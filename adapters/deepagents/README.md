@@ -59,7 +59,7 @@ Because `models.default.api_key_env` is provider-specific, the adapter declares 
 static env requirement; a runtime **preflight** verifies that the `deepagents`
 package is importable and the configured credential is set. A failed preflight
 fails runtime start with a stable lifecycle error. When the NeMo Fabric Runtime
-is installed, `fabric doctor` validates adapter resolution.
+is installed, `nemo-fabric doctor` validates adapter resolution.
 
 NeMo Fabric maps the following into the harness:
 

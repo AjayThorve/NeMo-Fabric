@@ -39,9 +39,6 @@ dependencies = [
 # telemetry.providers.relay is enabled, so the core install stays Relay-neutral
 # at import time.
 [project.optional-dependencies]
-# Allow both the current 0.5 line and the upcoming 0.6 release (which ships the
-# same SDK-native Deep Agents API). Resolves to 0.5.x today and adopts 0.6
-# automatically once it is published.
 relay = [
   "nemo-relay>=0.5.0,<0.7",
 ]

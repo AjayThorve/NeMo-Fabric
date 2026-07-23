@@ -25,14 +25,12 @@ Install the core runtime and Python SDK:
 pip install nemo-fabric
 ```
 
-When the runtime and adapter share an environment, choose the applicable short
-adapter extra for each harness:
+When the runtime and adapter share an environment, replace `<adapter>` with
+`claude`, `codex`, `deepagents`, or `hermes`. Repeat the command for each harness
+you use:
 
 ```bash
-pip install "nemo-fabric[claude]"
-pip install "nemo-fabric[codex]"
-pip install "nemo-fabric[deepagents]"
-pip install "nemo-fabric[hermes]"
+pip install "nemo-fabric[<adapter>]"
 ```
 
 These extras install the adapter and its adapter-owned runtime dependencies.
