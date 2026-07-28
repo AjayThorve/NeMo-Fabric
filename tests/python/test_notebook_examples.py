@@ -26,7 +26,26 @@ from nemo_fabric import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+QUICKSTART_NOTEBOOK = ROOT / "examples" / "notebooks" / "01_quickstart.ipynb"
 VARIATIONS_NOTEBOOK = ROOT / "examples" / "notebooks" / "02_variations.ipynb"
+
+
+def test_quickstart_notebook_hermes_config_plans_without_adapter_settings():
+    notebook = json.loads(QUICKSTART_NOTEBOOK.read_text(encoding="utf-8"))
+    source = next(
+        "".join(cell["source"])
+        for cell in notebook["cells"]
+        if "config = FabricConfig(" in "".join(cell["source"])
+    )
+    namespace = {"REPO_ROOT": ROOT}
+    # Execute only the checked-in notebook source controlled by this repository.
+    exec(compile(source, str(QUICKSTART_NOTEBOOK), "exec"), namespace)  # noqa: S102
+    config = namespace["config"]
+
+    plan = Fabric().plan(config, base_dir=ROOT)
+
+    assert plan.adapter.adapter_id == "nvidia.fabric.hermes"
+    assert plan.config.harness.settings == {}
 
 
 def _variation_harness_definitions(base_dir=BASE_DIR):
@@ -71,14 +90,27 @@ def test_variations_notebook_harnesses_plan_with_current_adapters():
         "Codex": "nvidia.fabric.codex",
         "Claude": "nvidia.fabric.claude",
     }
+    assert all(
+        harness["settings"] == {}
+        for harness in harnesses
+        if harness["name"] != "Claude"
+    )
+    assert plans["Hermes"].config.runtime.max_turns == 1
     codex = next(harness for harness in harnesses if harness["name"] == "Codex")
     assert "binary" not in codex
     assert "key" not in codex
     assert "skip_git_repo_check" not in codex["settings"]
     assert "validated when the adapter starts" in codex["needs"]
-    assert plans["Codex"].config.harness.settings["sandbox"] == "workspace-write"
-    assert plans["Codex"].config.harness.settings["reasoning_effort"] == "high"
+    assert codex["settings"] == {}
     assert plans["Codex"].config.runtime.input_schema == "text"
+    claude = next(harness for harness in harnesses if harness["name"] == "Claude")
+    assert "python" not in claude["settings"]
+    assert "system_prompt" not in claude["settings"]
+    assert plans["Claude"].config.instructions is not None
+    assert plans["Claude"].config.instructions.system is not None
+    assert (
+        plans["Claude"].config.instructions.system.content == "Test instruction."
+    )
 
 
 def test_variations_notebook_accepts_adapter_commands_and_relative_paths(

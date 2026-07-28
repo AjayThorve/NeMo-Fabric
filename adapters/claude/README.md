@@ -102,9 +102,16 @@ Configure portable capabilities through the normalized `FabricConfig` fields:
 
 Only Claude-specific controls belong in `harness.settings`:
 
-- `allowed_tools` and `permission_mode`
-- `max_budget_usd`
-- `setting_sources` (defaults to `[]` for deterministic isolation)
+| Setting | Type | Required | Static default |
+| --- | --- | --- | --- |
+| `permission_mode` | One of `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk`, or `auto` | No | No default |
+| `max_budget_usd` | Number greater than `0` | No | No default |
+| `setting_sources` | Array containing `user`, `project`, or `local` | No | `[]` |
+
+Planning validates these settings against the schema in the resolved Claude
+descriptor. Unknown keys and invalid values fail before the adapter starts.
+Schema defaults are documentation only; planning preserves the supplied settings
+without adding `setting_sources`.
 
 The adapter filters the inherited environment before launching Claude Code.
 It retains portable OS/config variables, the selected model's `api_key_env`,

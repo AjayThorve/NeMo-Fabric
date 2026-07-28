@@ -86,6 +86,43 @@ def test_claude_descriptor_is_narrow_and_versioned():
         "runner": {
             "module": "nemo_fabric_adapters.claude.adapter",
         },
+        "settings_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "setting_sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["user", "project", "local"],
+                    },
+                    "default": [],
+                    "description": "Claude settings scopes to load.",
+                },
+                "max_budget_usd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": (
+                        "Maximum amount in US dollars that Claude may spend during "
+                        "one invocation."
+                    ),
+                },
+                "permission_mode": {
+                    "type": "string",
+                    "enum": [
+                        "default",
+                        "acceptEdits",
+                        "bypassPermissions",
+                        "plan",
+                        "dontAsk",
+                        "auto",
+                    ],
+                    "description": "Claude permission handling mode.",
+                },
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
         "config": {
             "accepts": [
                 "models",
@@ -123,7 +160,6 @@ def claude_payload_fixture(tmp_path) -> dict[str, Any]:
             "harness": {
                 "adapter_id": "nvidia.fabric.claude",
                 "settings": {
-                    "allowed_tools": ["Read"],
                     "permission_mode": "dontAsk",
                     "max_budget_usd": 1.5,
                     "setting_sources": [],
@@ -181,7 +217,7 @@ def test_build_options_maps_normalized_capabilities_and_claude_settings(claude_p
     assert options.model == "claude-test-model"
     assert options.system_prompt == "Review carefully."
     assert options.tools is None
-    assert options.allowed_tools == ["Read"]
+    assert options.allowed_tools == []
     assert options.disallowed_tools == ["Bash"]
     assert options.hooks is not None
     assert options.permission_mode == "dontAsk"

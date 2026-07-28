@@ -551,7 +551,7 @@ def build_options(
         model=selected_model(payload),
         system_prompt=system_prompt,
         tools=enabled_tools,
-        allowed_tools=_string_list(settings.get("allowed_tools"), name="allowed_tools"),
+        allowed_tools=[],
         disallowed_tools=common_utils.blocked_tools(payload),
         hooks=tool_policy_hooks(payload),
         permission_mode=permission_mode,

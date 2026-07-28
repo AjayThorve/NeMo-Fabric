@@ -1001,12 +1001,13 @@ def test_codex_config_resolves_sdk_adapter():
         url="https://mcp.example.test/mcp",
         exposure="harness_native",
     )
+
     plan = Fabric().plan(config, base_dir=BASE_DIR)
 
     assert plan.adapter.adapter_id == "nvidia.fabric.codex"
     assert plan.adapter.harness == "codex"
     assert plan.config.runtime.input_schema == "text"
-    assert plan.config.harness.settings["reasoning_effort"] == "high"
+    assert plan.config.harness.settings == {}
     native = plan["capability_plan"]["native"]
     assert native["skill_paths"] == [str(skill_path)]
     assert native["mcp_servers"]["github"] == {
