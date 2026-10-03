@@ -31,28 +31,24 @@ separate CLI installation.
 
 ## Authentication
 
-NeMo Fabric reuses the authentication state that Codex stores under `CODEX_HOME`
-(default: `~/.codex`). NeMo Fabric does not perform an interactive login, copy
-credentials, or mutate the user's Codex configuration.
+For a cached ChatGPT or Codex API-key login, NeMo Fabric reuses the
+authentication state under `CODEX_HOME` (default: `~/.codex`). Sign in with
+Codex before running NeMo Fabric. Set `CODEX_HOME` to the same location for login
+and execution if you use a nondefault credential store.
 
-Codex supports two OpenAI authentication modes:
+For noninteractive OpenAI API-key authentication, set
+`models.<role>.api_key_env` to the name of an environment variable containing
+the key. The adapter calls the Codex SDK's `login_api_key` during startup. It
+creates a private, temporary `CODEX_HOME` outside Fabric artifacts for this
+login, even if the host has another `CODEX_HOME`, and removes it after the
+runtime stops or startup fails. This mode uses OpenAI Platform billing rather
+than ChatGPT plan credits.
 
-- **ChatGPT login:** Sign in through Codex with a ChatGPT plan. NeMo Fabric can then
-  run without `OPENAI_API_KEY` while that cached login remains valid.
-- **API key login:** Provision the same Codex credential store with an OpenAI
-  API key. This mode uses OpenAI Platform billing rather than ChatGPT plan
-  credits.
-
-For a nondefault credential store, set `CODEX_HOME` before both login and the
-NeMo Fabric invocation. Treat `CODEX_HOME/auth.json` as a secret when Codex uses
-file-based credential storage. Refer to the
+Treat any Codex `CODEX_HOME/auth.json` as a secret when Codex uses file-based
+credential storage. Do not copy it into NeMo Fabric configuration or artifacts.
+Refer to the
 [Codex authentication documentation](https://developers.openai.com/codex/auth/)
-for login, headless setup, and credential-storage options.
-
-The adapter forwards `OPENAI_API_KEY` and a selected model's `api_key_env` to
-the SDK runtime. The current real-agent acceptance path validates an existing
-Codex login; it does not yet claim a raw environment variable as a complete
-login flow.
+for login and credential-storage options.
 
 The native `openai` provider retains Codex authentication and endpoint
 discovery. For another provider name, configure both

@@ -324,6 +324,89 @@ def mock_codex_fixture(monkeypatch):
     return mock_codex
 
 
+def test_explicit_openai_api_key_logs_in_under_invocation_home(
+    codex_payload, mock_codex, monkeypatch, tmp_path
+):
+    codex_payload["config"]["models"]["default"]["api_key_env"] = (
+        "FABRIC_CODEX_TEST_KEY"
+    )
+    monkeypatch.setenv("FABRIC_CODEX_TEST_KEY", "test-api-key")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "existing-codex-home"))
+    codex_payload["runtime_context"]["environment"]["env"] = {
+        "CODEX_HOME": str(tmp_path / "artifacts" / "unsafe-home")
+    }
+
+    output = invoke_once(codex_payload)
+
+    assert output["completed"] is True
+    client = mock_codex.instances[0]
+    client.login_api_key.assert_awaited_once_with("test-api-key")
+    assert client.config.env["OPENAI_API_KEY"] == "test-api-key"
+    api_key_home = Path(client.config.env["CODEX_HOME"])
+    assert not api_key_home.is_relative_to(tmp_path / "artifacts")
+    assert not api_key_home.exists()
+    assert os.environ["CODEX_HOME"] == str(tmp_path / "existing-codex-home")
+
+
+def test_explicit_openai_api_key_missing_fails_before_thread_start(
+    codex_payload, mock_codex, monkeypatch
+):
+    codex_payload["config"]["models"]["default"]["api_key_env"] = (
+        "FABRIC_CODEX_TEST_KEY"
+    )
+    monkeypatch.delenv("FABRIC_CODEX_TEST_KEY", raising=False)
+
+    error = runtime_start_error(codex_payload)
+
+    assert error.code == "codex_invalid_configuration"
+    assert "FABRIC_CODEX_TEST_KEY is required" in error.message
+    assert mock_codex.instances == []
+
+
+def test_explicit_openai_api_key_failed_login_removes_private_home(
+    codex_payload, mock_codex, monkeypatch, tmp_path
+):
+    codex_payload["config"]["models"]["default"]["api_key_env"] = (
+        "FABRIC_CODEX_TEST_KEY"
+    )
+    monkeypatch.setenv("FABRIC_CODEX_TEST_KEY", "test-api-key")
+    build_client = mock_codex.side_effect
+
+    def build_failing_client(*args, **kwargs):
+        client = build_client(*args, **kwargs)
+        client.login_api_key.side_effect = RuntimeError("login failed")
+        return client
+
+    mock_codex.side_effect = build_failing_client
+
+    error = runtime_start_error(codex_payload)
+
+    assert error.code == "codex_turn_failed"
+    client = mock_codex.instances[0]
+    api_key_home = Path(client.config.env["CODEX_HOME"])
+    assert not api_key_home.is_relative_to(tmp_path / "artifacts")
+    assert not api_key_home.exists()
+    client.close.assert_awaited_once()
+
+
+def test_explicit_openai_api_key_rejects_temp_home_under_artifacts(
+    codex_payload, mock_codex, monkeypatch, tmp_path
+):
+    codex_payload["config"]["models"]["default"]["api_key_env"] = (
+        "FABRIC_CODEX_TEST_KEY"
+    )
+    monkeypatch.setenv("FABRIC_CODEX_TEST_KEY", "test-api-key")
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    monkeypatch.setattr(adapter.tempfile, "tempdir", str(artifact_root))
+
+    error = runtime_start_error(codex_payload)
+
+    assert error.code == "codex_invalid_configuration"
+    assert mock_codex.instances == []
+    assert list(artifact_root.iterdir()) == []
+
+
 def test_single_invocation_uses_native_thread_and_turn_contract(
     codex_payload, mock_codex, tmp_path
 ):

@@ -33,5 +33,6 @@ def test_missing_harbor_dependency_reports_python_requirement():
         timeout=30,
     )
 
-    assert "requires Python 3.12 or later" in result.stdout
+    assert "3.12 or later" in result.stdout
+    assert "Harbor release (0.23.x)" in result.stdout
     assert "install nemo-fabric[harbor]" in result.stdout

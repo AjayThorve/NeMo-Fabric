@@ -271,6 +271,39 @@ def test_harbor_generated_config_maps_fabric_specific_options(tmp_path: Path):
     assert spec.config.relay.observability.atif.enabled is True
 
 
+def test_harbor_discovers_task_local_pi_descriptor_with_uploaded_bundle(
+    tmp_path: Path,
+):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    descriptor = "/opt/nemo-fabric/adapters/typescript/pi/pi.fabric-adapter.json"
+    agent = FabricAgent(
+        logs_dir=tmp_path / "logs",
+        fabric_adapter_id="nvidia.fabric.pi",
+        fabric_config_bundle=bundle,
+        fabric_discovery_paths=[descriptor],
+    )
+
+    spec = agent._build_spec("fix it")
+
+    assert spec.config.discovery is not None
+    assert spec.config.discovery.local_paths == ["adapters", descriptor]
+    assert spec.config_base_dir == PurePosixPath("/tmp/nemo-fabric-config")
+
+
+def test_harbor_codex_defaults_allow_unattended_workspace_edits(tmp_path: Path):
+    agent = FabricAgent(
+        logs_dir=tmp_path,
+        fabric_adapter_id="nvidia.fabric.codex",
+        model_name="openai/gpt-5.4",
+    )
+
+    assert agent._build_spec("fix it").config.harness.settings == {
+        "sandbox": "workspace-write",
+        "approval_mode": "deny_all",
+    }
+
+
 def test_harbor_generated_config_names_the_model_credential(tmp_path: Path):
     """Adapters read the key from the variable named in ``api_key_env``; the deepagents
     adapter refuses a non-OpenAI provider without it, so Harbor runs against
@@ -412,8 +445,7 @@ def test_harbor_propagates_runtime_identity(tmp_path: Path):
 
 async def test_harbor_structured_package_install_is_shell_safe(tmp_path: Path):
     with (
-        Path(__file__).resolve().parents[2]
-        / "sdk/python/nemo-fabric/pyproject.toml"
+        Path(__file__).resolve().parents[2] / "sdk/python/nemo-fabric/pyproject.toml"
     ).open("rb") as file:
         package_version = tomllib.load(file)["project"]["version"]
     fabric_package = f"nemo-fabric[codex,harbor]=={package_version}"

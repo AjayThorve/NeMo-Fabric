@@ -7,9 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 
 This self-contained calculator task is the fastest way to check the complete
 Harbor → `FabricAgent` → NeMo Fabric → verifier path. Start with the deterministic,
-credential-free scripted run, then use the same task to try Hermes Agent, Relay
-telemetry, OpenClaw, or Claude. `FabricAgent` translates Harbor options into a complete
-typed `FabricConfig`; Harbor owns the task, container, verifier, reward,
+credential-free scripted run, then use the same task to try OpenClaw, Claude,
+Pi, or Codex. `FabricAgent` translates Harbor
+options into a complete typed `FabricConfig`; Harbor owns the task, container, verifier, reward,
 concurrency, and run layout.
 
 ## Before You Start
@@ -20,8 +20,12 @@ same shell. Commit the NeMo Fabric revision you want to run because the build co
 is created from `HEAD`.
 
 The credential-free smoke does not require an API key. Export `NVIDIA_API_KEY`
-for Hermes Agent and OpenClaw runs or `ANTHROPIC_API_KEY` for the Claude run
-before using that harness. The first image build can take several minutes.
+for OpenClaw and Pi runs; `ANTHROPIC_API_KEY` for Claude; or
+`OPENAI_API_KEY` for Codex. The first image build can take several minutes.
+
+Harbor 0.23 resolves literal `${VAR}` values in `--ae` against the host
+environment. The commands below keep those templates quoted so the shell does
+not put API keys in the Harbor process arguments.
 
 ## Prepare the Build Context
 
@@ -72,70 +76,7 @@ uv run --extra harbor harbor run \
 
 Expected Harbor summary: one trial, zero exceptions, and mean reward `1.000`.
 
-## 2. Hermes Agent
-
-```bash
-: "${NVIDIA_API_KEY:?Export NVIDIA_API_KEY before running Hermes Agent}"
-
-uv run --extra harbor harbor run \
-  --path "$TASK_DIR" \
-  --agent nemo_fabric.integrations.harbor:FabricAgent \
-  --model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning \
-  --ak fabric_adapter_id=nvidia.fabric.hermes \
-  --ak fabric_config_base_dir=/opt/fabric-calculator \
-  --ak fabric_workspace=/app \
-  --ak fabric_model_base_url=https://integrate.api.nvidia.com/v1 \
-  --ak fabric_max_turns=20 \
-  --ae "ADAPTER_PYTHON=/opt/hermes-venv/bin/python" \
-  --ae "NVIDIA_API_KEY=$NVIDIA_API_KEY" \
-  --job-name fabric-hermes \
-  --jobs-dir "$RUNS_DIR" \
-  --n-concurrent 1 \
-  --n-attempts 1 \
-  --force-build
-```
-
-The Harbor model and agent arguments become the model and harness fields in the
-typed config. The API key is passed separately as a task credential.
-
-## 3. Hermes Agent with Relay Telemetry
-
-```bash
-: "${NVIDIA_API_KEY:?Export NVIDIA_API_KEY before running Hermes Agent}"
-
-uv run --extra harbor harbor run \
-  --path "$TASK_DIR" \
-  --agent nemo_fabric.integrations.harbor:FabricAgent \
-  --model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning \
-  --ak fabric_adapter_id=nvidia.fabric.hermes \
-  --ak fabric_config_base_dir=/opt/fabric-calculator \
-  --ak fabric_workspace=/app \
-  --ak fabric_telemetry=relay \
-  --ak fabric_model_base_url=https://integrate.api.nvidia.com/v1 \
-  --ak fabric_max_turns=4 \
-  --ae "ADAPTER_PYTHON=/opt/hermes-venv/bin/python" \
-  --ae "NVIDIA_API_KEY=$NVIDIA_API_KEY" \
-  --job-name fabric-hermes-relay \
-  --jobs-dir "$RUNS_DIR" \
-  --n-concurrent 1 \
-  --n-attempts 1 \
-  --force-build
-```
-
-The completed run writes direct Relay ATOF and ATIF records into the Harbor
-agent logs:
-
-```bash
-find "$RUNS_DIR/fabric-hermes-relay" \
-  -name 'events.atof.jsonl' \
-  -print -exec sed -n '1,5p' {} \;
-
-find "$RUNS_DIR/fabric-hermes-relay" \
-  -name '*.atif.json' \
-  -print -exec python -m json.tool {} \;
-```
-
-## 4. OpenClaw
+## 2. OpenClaw
 
 The task image installs Node.js, OpenClaw, and the OpenClaw adapter. This run
 uses the NVIDIA API through OpenClaw's OpenAI-compatible provider.
@@ -153,7 +94,7 @@ uv run --extra harbor harbor run \
   --ak fabric_model_base_url=https://integrate.api.nvidia.com/v1 \
   --ak fabric_model_api_key_env=NVIDIA_API_KEY \
   --ak fabric_runtime_timeout_seconds=600 \
-  --ae "NVIDIA_API_KEY=$NVIDIA_API_KEY" \
+  --ae 'NVIDIA_API_KEY=${NVIDIA_API_KEY}' \
   --job-name fabric-openclaw \
   --jobs-dir "$RUNS_DIR" \
   --n-concurrent 1 \
@@ -161,7 +102,7 @@ uv run --extra harbor harbor run \
   --force-build
 ```
 
-## 5. Claude
+## 3. Claude
 
 The Claude Agent SDK supplies its compatible Claude Code executable. Harbor
 passes the API key into the task environment. NeMo Fabric forwards the supported
@@ -180,7 +121,7 @@ uv run --extra harbor harbor run \
   --ak fabric_workspace=/app \
   --ak fabric_max_turns=20 \
   --ak fabric_runtime_timeout_seconds=600 \
-  --ae "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+  --ae 'ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}' \
   --job-name fabric-claude \
   --jobs-dir "$RUNS_DIR" \
   --n-concurrent 1 \
@@ -192,6 +133,68 @@ The config uses `bypassPermissions` and `IS_SANDBOX=1` because Harbor runs the
 harness as root inside an ephemeral task container and the benchmark expects it
 to edit `/app`. Do not reuse this combination outside a deliberately isolated
 evaluation container.
+
+## 4. Pi
+
+The task image builds the Pi adapter and its pinned SDK harness from the same
+vendored Fabric revision. `fabric_discovery_paths` points to its task-local
+TypeScript descriptor; the NVIDIA model and API key stay the same as the other
+NVIDIA-backed calculator runs.
+
+```bash
+: "${NVIDIA_API_KEY:?Export NVIDIA_API_KEY before running Pi}"
+
+uv run --extra harbor harbor run \
+  --path "$TASK_DIR" \
+  --agent nemo_fabric.integrations.harbor:FabricAgent \
+  --model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning \
+  --ak fabric_adapter_id=nvidia.fabric.pi \
+  --ak fabric_config_base_dir=/opt/fabric-calculator \
+  --ak 'fabric_discovery_paths=["/opt/nemo-fabric/adapters/typescript/pi/pi.fabric-adapter.json"]' \
+  --ak fabric_workspace=/app \
+  --ak fabric_model_base_url=https://integrate.api.nvidia.com/v1 \
+  --ak fabric_model_api_key_env=NVIDIA_API_KEY \
+  --ak fabric_runtime_timeout_seconds=600 \
+  --ae 'NVIDIA_API_KEY=${NVIDIA_API_KEY}' \
+  --job-name fabric-pi \
+  --jobs-dir "$RUNS_DIR" \
+  --n-concurrent 1 \
+  --n-attempts 1 \
+  --force-build
+```
+
+## 5. Codex
+
+The task image installs the Codex Python adapter and its SDK-managed app-server.
+The Harbor wrapper gives Codex `workspace-write` sandboxing and denies interactive
+approval requests by default, so it can edit the isolated `/app` workspace.
+Codex uses the OpenAI API credential named by `fabric_model_api_key_env`
+for a noninteractive, task-local login. A host Codex login is not copied into
+the container.
+
+```bash
+: "${OPENAI_API_KEY:?Export OPENAI_API_KEY before running Codex}"
+
+uv run --extra harbor harbor run \
+  --path "$TASK_DIR" \
+  --agent nemo_fabric.integrations.harbor:FabricAgent \
+  --model openai/gpt-5.4 \
+  --ak fabric_adapter_id=nvidia.fabric.codex \
+  --ak fabric_config_base_dir=/opt/fabric-calculator \
+  --ak fabric_workspace=/app \
+  --ak fabric_model_api_key_env=OPENAI_API_KEY \
+  --ak fabric_runtime_timeout_seconds=600 \
+  --ae 'OPENAI_API_KEY=${OPENAI_API_KEY}' \
+  --job-name fabric-codex \
+  --jobs-dir "$RUNS_DIR" \
+  --n-concurrent 1 \
+  --n-attempts 1 \
+  --force-build
+```
+
+The OpenClaw, Claude, Pi, and Codex runs use the same task and verifier as the
+scripted smoke. Compare their `result.json` rewards and `agent/` metadata under
+`$RUNS_DIR` to see the selected harness without changing Harbor task setup.
 
 ## Inspect Results
 

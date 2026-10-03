@@ -16,6 +16,10 @@ from typing import Any
 from typing import Literal
 from typing import cast
 
+from pydantic import Field
+from pydantic import field_validator
+from pydantic import model_validator
+
 from nemo_fabric import EnvironmentConfig
 from nemo_fabric import DiscoveryConfig
 from nemo_fabric import FabricConfig
@@ -57,6 +61,8 @@ HARBOR_DEFAULT_WORKSPACE = "/testbed"
 
 try:
     from harbor.agents.base import BaseAgent
+    from harbor.agents.capabilities import AgentCapabilities
+    from harbor.agents.options import AgentOptions
     from harbor.environments.base import BaseEnvironment
     from harbor.models.agent.context import AgentContext
 except (
@@ -75,8 +81,8 @@ if _HARBOR_IMPORT_ERROR is not None:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             raise ModuleNotFoundError(
                 "nemo_fabric.integrations.harbor requires the Harbor optional "
-                "dependency, which requires Python 3.12 or later; install "
-                "nemo-fabric[harbor] on a supported interpreter"
+                "dependency and a compatible Harbor release (0.23.x) on Python "
+                "3.12 or later; install nemo-fabric[harbor] on a supported interpreter"
             ) from _HARBOR_IMPORT_ERROR
 
         @staticmethod
@@ -85,6 +91,147 @@ if _HARBOR_IMPORT_ERROR is not None:
 
 else:
 
+    class FabricAgentOptions(AgentOptions):
+        """Harbor-facing options for the task-local Fabric runner."""
+
+        fabric_adapter_id: str = Field(description="Installed Fabric adapter ID.")
+        fabric_config_base_dir: str | None = Field(
+            default=None,
+            description="Task-local base directory for relative Fabric paths.",
+        )
+        fabric_config_bundle: Path | None = Field(
+            default=None,
+            description="Host directory to upload into the task environment.",
+        )
+        fabric_config_target: str = Field(
+            default="/tmp/nemo-fabric-config",
+            description="Task-local destination for the uploaded bundle.",
+        )
+        fabric_discovery_paths: list[str] | None = Field(
+            default=None,
+            description="Task-local adapter descriptor paths for Fabric discovery.",
+        )
+        fabric_workspace: str = Field(
+            default=HARBOR_DEFAULT_WORKSPACE,
+            description="Absolute task workspace path.",
+        )
+        fabric_harness_settings: dict[str, Any] | None = Field(
+            default=None, description="Selected adapter settings."
+        )
+        fabric_model_base_url: str | None = Field(
+            default=None,
+            description="Model provider base URL; requires a Harbor model.",
+        )
+        fabric_model_api_key_env: str | None = Field(
+            default=None,
+            description="Name of a task-environment model credential variable.",
+        )
+        fabric_system_instruction: str | None = Field(
+            default=None,
+            description="System instruction passed to the selected adapter.",
+        )
+        fabric_max_turns: int | None = Field(
+            default=None, gt=0, description="Maximum agent turns."
+        )
+        fabric_runtime_timeout_seconds: float | None = Field(
+            default=None, gt=0, description="Fabric runtime timeout in seconds."
+        )
+        fabric_environment_env: dict[str, str] | None = Field(
+            default=None, description="Task-local Fabric environment variables."
+        )
+        fabric_blocked_tools: list[str] | None = Field(
+            default=None, description="Tools to block in the selected adapter."
+        )
+        fabric_enabled_tools: list[str] | None = Field(
+            default=None, description="Tools to enable in the selected adapter."
+        )
+        fabric_telemetry: Literal["none", "relay"] = Field(
+            default="none", description="Enable Relay-backed ATIF and ATOF telemetry."
+        )
+        fabric_python: str = Field(
+            default="python3",
+            description="Python executable inside the task environment.",
+        )
+        fabric_package: str | None = Field(
+            default=None,
+            description="Fabric package requirement to install in a task-local venv.",
+        )
+        fabric_venv_path: str = Field(
+            default="/tmp/nemo-fabric-venv",
+            description="Task-local virtual environment for fabric_package.",
+        )
+        fabric_install_command: str | None = Field(
+            default=None,
+            description="Deprecated custom task installation command; prefer fabric_package.",
+        )
+        fabric_cwd: str | None = Field(
+            default=None,
+            description="Task-local working directory for runner commands.",
+        )
+        fabric_timeout_sec: int | None = Field(
+            default=None, gt=0, description="Task command timeout in seconds."
+        )
+
+        @field_validator("fabric_adapter_id")
+        @classmethod
+        def validate_adapter_id(cls, value: str) -> str:
+            if not value.strip():
+                raise ValueError("fabric_adapter_id must not be empty")
+            return value
+
+        @field_validator("fabric_model_api_key_env")
+        @classmethod
+        def validate_model_api_key_env(cls, value: str | None) -> str | None:
+            if value is not None and (not value or value != value.strip()):
+                raise ValueError(
+                    "fabric_model_api_key_env must be a non-empty environment variable name without surrounding whitespace"
+                )
+            return value
+
+        @field_validator("fabric_discovery_paths")
+        @classmethod
+        def validate_discovery_paths(cls, value: list[str] | None) -> list[str] | None:
+            if value is not None and any(not path.strip() for path in value):
+                raise ValueError("fabric_discovery_paths must contain non-empty paths")
+            return value
+
+        @field_validator("fabric_blocked_tools", "fabric_enabled_tools")
+        @classmethod
+        def validate_tool_names(cls, value: list[str] | None) -> list[str] | None:
+            if value is not None and any(not tool.strip() for tool in value):
+                raise ValueError("tool names must contain non-empty strings")
+            return value
+
+        @model_validator(mode="after")
+        def validate_paths_and_install(self) -> "FabricAgentOptions":
+            for name in (
+                "fabric_workspace",
+                "fabric_config_target",
+                "fabric_config_base_dir",
+            ):
+                value = getattr(self, name)
+                if value is None:
+                    continue
+                path = PurePosixPath(value)
+                if not path.is_absolute() or ".." in path.parts:
+                    raise ValueError(
+                        f"{name} must be an absolute task-environment path"
+                    )
+            if self.fabric_config_bundle is not None:
+                if not self.fabric_config_bundle.is_dir():
+                    raise ValueError(
+                        f"fabric_config_bundle must be an existing directory: {self.fabric_config_bundle}"
+                    )
+                if self.fabric_config_base_dir is not None:
+                    raise ValueError(
+                        "fabric_config_base_dir is derived from fabric_config_target when fabric_config_bundle is set"
+                    )
+            if self.fabric_package and self.fabric_install_command:
+                raise ValueError(
+                    "fabric_package and fabric_install_command are mutually exclusive"
+                )
+            return self
+
     class FabricAgent(BaseAgent):
         """Harbor agent wrapper that delegates harness execution to NeMo Fabric.
 
@@ -92,7 +239,20 @@ else:
         reward calculation. NeMo Fabric owns the selected agent harness invocation.
         """
 
-        SUPPORTS_ATIF = True
+        # Current Harbor main gates task skills and MCP servers on these fields;
+        # the published 0.23.0 capabilities model does not define them yet.
+        capabilities = AgentCapabilities.model_validate(
+            {
+                "atif": True,
+                **{
+                    field: True
+                    for field in ("skills", "mcp_servers")
+                    if field in AgentCapabilities.model_fields
+                },
+            }
+        )
+        options_model = FabricAgentOptions
+        options: FabricAgentOptions
 
         def __init__(
             self,
@@ -120,65 +280,65 @@ else:
             extra_env: dict[str, str] | None = None,
             *args: Any,
             fabric_model_api_key_env: str | None = None,
+            fabric_discovery_paths: list[str] | None = None,
             **kwargs: Any,
         ) -> None:
-            super().__init__(logs_dir=logs_dir, extra_env=extra_env, *args, **kwargs)
-            # Harbor passes agent-scoped environment variables to custom agents,
-            # while newer BaseAgent versions intentionally ignore unknown kwargs.
-            # Retain the mapping here for both old and new Harbor releases.
-            self._extra_env = dict(extra_env or {})
-            if not fabric_adapter_id.strip():
-                raise ValueError("fabric_adapter_id must not be empty")
-            workspace = PurePosixPath(fabric_workspace)
-            if not workspace.is_absolute() or ".." in workspace.parts:
-                raise ValueError(
-                    "fabric_workspace must be an absolute task-environment path"
-                )
-            blocked_tools = list(fabric_blocked_tools or [])
-            if any(
-                not isinstance(tool, str) or not tool.strip() for tool in blocked_tools
-            ):
-                raise ValueError("fabric_blocked_tools must contain non-empty strings")
-            if fabric_telemetry not in {"none", "relay"}:
-                raise ValueError("fabric_telemetry must be 'none' or 'relay'")
-            self.fabric_adapter_id = fabric_adapter_id
-            self.fabric_config_base_dir = fabric_config_base_dir
-            self.fabric_config_bundle = fabric_config_bundle
-            self.fabric_config_target = fabric_config_target
-            self.fabric_workspace = str(workspace)
-            self.fabric_harness_settings = dict(fabric_harness_settings or {})
-            self.fabric_model_base_url = fabric_model_base_url
-            if fabric_model_api_key_env is not None and (
-                not fabric_model_api_key_env
-                or fabric_model_api_key_env != fabric_model_api_key_env.strip()
-            ):
-                raise ValueError(
-                    "fabric_model_api_key_env must be a non-empty environment "
-                    "variable name without surrounding whitespace"
-                )
-            self.fabric_model_api_key_env = fabric_model_api_key_env
-            self.fabric_system_instruction = fabric_system_instruction
-            self.fabric_max_turns = fabric_max_turns
-            self.fabric_runtime_timeout_seconds = fabric_runtime_timeout_seconds
-            self.fabric_environment_env = dict(fabric_environment_env or {})
-            self.fabric_blocked_tools = blocked_tools
+            super().__init__(
+                logs_dir=logs_dir,
+                extra_env=extra_env,
+                *args,
+                fabric_adapter_id=fabric_adapter_id,
+                fabric_config_base_dir=fabric_config_base_dir,
+                fabric_config_bundle=fabric_config_bundle,
+                fabric_config_target=fabric_config_target,
+                fabric_discovery_paths=fabric_discovery_paths,
+                fabric_workspace=fabric_workspace,
+                fabric_harness_settings=fabric_harness_settings,
+                fabric_model_base_url=fabric_model_base_url,
+                fabric_model_api_key_env=fabric_model_api_key_env,
+                fabric_system_instruction=fabric_system_instruction,
+                fabric_max_turns=fabric_max_turns,
+                fabric_runtime_timeout_seconds=fabric_runtime_timeout_seconds,
+                fabric_environment_env=fabric_environment_env,
+                fabric_blocked_tools=fabric_blocked_tools,
+                fabric_enabled_tools=fabric_enabled_tools,
+                fabric_telemetry=fabric_telemetry,
+                fabric_python=fabric_python,
+                fabric_package=fabric_package,
+                fabric_venv_path=fabric_venv_path,
+                fabric_install_command=fabric_install_command,
+                fabric_cwd=fabric_cwd,
+                fabric_timeout_sec=fabric_timeout_sec,
+                **kwargs,
+            )
+            options = self.options
+            self.fabric_adapter_id = options.fabric_adapter_id
+            self.fabric_config_base_dir = options.fabric_config_base_dir
+            self.fabric_config_bundle = options.fabric_config_bundle
+            self.fabric_config_target = options.fabric_config_target
+            self.fabric_discovery_paths = list(options.fabric_discovery_paths or [])
+            self.fabric_workspace = options.fabric_workspace
+            self.fabric_harness_settings = dict(options.fabric_harness_settings or {})
+            self.fabric_model_base_url = options.fabric_model_base_url
+            self.fabric_model_api_key_env = options.fabric_model_api_key_env
+            self.fabric_system_instruction = options.fabric_system_instruction
+            self.fabric_max_turns = options.fabric_max_turns
+            self.fabric_runtime_timeout_seconds = options.fabric_runtime_timeout_seconds
+            self.fabric_environment_env = dict(options.fabric_environment_env or {})
+            self.fabric_blocked_tools = list(options.fabric_blocked_tools or [])
             self.fabric_enabled_tools = (
-                list(fabric_enabled_tools)
-                if fabric_enabled_tools is not None
+                list(options.fabric_enabled_tools)
+                if options.fabric_enabled_tools is not None
                 else None
             )
-            self.fabric_telemetry = fabric_telemetry
-            self.fabric_python = fabric_python
-            self.fabric_package = fabric_package
-            self.fabric_venv_path = fabric_venv_path
-            self.fabric_install_command = fabric_install_command
-            self.fabric_cwd = fabric_cwd
-            self.fabric_timeout_sec = fabric_timeout_sec
-            if fabric_package and fabric_install_command:
-                raise ValueError(
-                    "fabric_package and fabric_install_command are mutually exclusive"
-                )
-            if fabric_install_command:
+            self.fabric_telemetry = options.fabric_telemetry
+            self.fabric_python = options.fabric_python
+            self.fabric_package = options.fabric_package
+            self.fabric_venv_path = options.fabric_venv_path
+            self.fabric_install_command = options.fabric_install_command
+            self.fabric_cwd = options.fabric_cwd
+            self.fabric_timeout_sec = options.fabric_timeout_sec
+            if self.fabric_install_command:
                 warnings.warn(
                     "fabric_install_command is deprecated; use fabric_package",
                     DeprecationWarning,
@@ -304,7 +464,10 @@ else:
                     HarborMcpServer.model_validate(server.model_dump(mode="python"))
                     for server in self.mcp_servers
                 ),
-                discovery_paths=("adapters",) if self.fabric_config_bundle else (),
+                discovery_paths=(
+                    *(("adapters",) if self.fabric_config_bundle else ()),
+                    *self.fabric_discovery_paths,
+                ),
             )
 
         def _resolve_environment_config_base_dir(self) -> str:
@@ -518,6 +681,11 @@ def harbor_harness_defaults(adapter_id: str) -> dict[str, Any]:
     if adapter_id == "nvidia.fabric.claude":
         return {
             "permission_mode": "bypassPermissions",
+        }
+    if adapter_id == "nvidia.fabric.codex":
+        return {
+            "sandbox": "workspace-write",
+            "approval_mode": "deny_all",
         }
     return {}
 

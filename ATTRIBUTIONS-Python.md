@@ -3928,7 +3928,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-## harbor (0.18.0)
+## harbor (0.23.0)
 
 ### Licenses
 License: `Apache-2.0`
