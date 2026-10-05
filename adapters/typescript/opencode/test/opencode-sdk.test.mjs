@@ -229,6 +229,7 @@ test("configures validated Fabric skill directories for OpenCode", async () => {
   const baseDir = await mkdtemp(join(tmpdir(), "fabric-opencode-skills-"));
   const skillDirectory = join(baseDir, "skills", "review");
   let capturedConfig;
+  let skillListCalls = 0;
   try {
     await mkdir(skillDirectory, { recursive: true });
     await writeFile(
@@ -242,11 +243,13 @@ test("configures validated Fabric skill directories for OpenCode", async () => {
           async create(options) {
             capturedConfig = options.config.content;
             return {
-              plugin: { async awaitActivation() {} },
               skill: {
                 async list() {
+                  skillListCalls += 1;
                   return {
-                    data: [{ name: "review", location: await realpath(join(skillDirectory, "SKILL.md")) }],
+                    data: skillListCalls === 1
+                      ? []
+                      : [{ name: "review", path: await realpath(join(skillDirectory, "SKILL.md")) }],
                   };
                 },
               },
@@ -274,8 +277,59 @@ test("configures validated Fabric skill directories for OpenCode", async () => {
       },
       skills: [await realpath(skillDirectory)],
     });
+    assert.equal(skillListCalls, 2);
     await handle.stop();
   } finally {
+    await rm(baseDir, { recursive: true, force: true });
+  }
+});
+
+test("aborts a stalled skill discovery request at the discovery deadline", async () => {
+  const originalTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 0);
+    return controller.signal;
+  };
+  const baseDir = await mkdtemp(join(tmpdir(), "fabric-opencode-stalled-skill-"));
+  const skillDirectory = join(baseDir, "skills", "review");
+  let closed = false;
+  try {
+    await mkdir(skillDirectory, { recursive: true });
+    await writeFile(join(skillDirectory, "SKILL.md"), "---\nname: review\n---\nReview the change.\n", "utf8");
+    const factory = new OpenCodeSdkSessionFactory(async () => ({
+      OpenCode: {
+        async create() {
+          return {
+            skill: {
+              async list(_input, requestOptions) {
+                if (requestOptions?.signal === undefined) {
+                  throw new Error("OpenCode request options did not include an abort signal");
+                }
+                return new Promise((_resolve, reject) => {
+                  requestOptions.signal.addEventListener("abort", () => reject(requestOptions.signal.reason), {
+                    once: true,
+                  });
+                });
+              },
+            },
+            sessions: {
+              async create() { throw new Error("a stalled skill request must fail before session creation"); },
+              async remove() {},
+            },
+            async close() { closed = true; },
+          };
+        },
+      },
+    }));
+    const input = startInput();
+    input.baseDir = baseDir;
+    input.config.skills = { paths: ["skills/review"] };
+
+    await assert.rejects(factory.create(input), (error) => error.code === "opencode_skill_load_failed");
+    assert.equal(closed, true);
+  } finally {
+    AbortSignal.timeout = originalTimeout;
     await rm(baseDir, { recursive: true, force: true });
   }
 });
@@ -300,7 +354,6 @@ test("rejects a configured skill that OpenCode did not load", async () => {
       OpenCode: {
         async create() {
           return {
-            plugin: { async awaitActivation() {} },
             skill: { async list() { return { data: [] }; } },
             sessions: {
               async create() { throw new Error("a malformed skill must fail before session creation"); },
@@ -336,14 +389,13 @@ test("rejects Markdown files and nested skills discovered outside configured ski
       OpenCode: {
         async create() {
           return {
-            plugin: { async awaitActivation() {} },
             skill: {
               async list() {
                 return {
                   data: [
-                    { name: "review", location: await realpath(join(skillDirectory, "SKILL.md")) },
-                    { name: "readme", location: await realpath(join(skillDirectory, "README.md")) },
-                    { name: "experimental", location: await realpath(join(nestedDirectory, "SKILL.md")) },
+                    { name: "review", path: await realpath(join(skillDirectory, "SKILL.md")) },
+                    { name: "readme", path: await realpath(join(skillDirectory, "README.md")) },
+                    { name: "experimental", path: await realpath(join(nestedDirectory, "SKILL.md")) },
                   ],
                 };
               },
@@ -377,13 +429,12 @@ test("allows OpenCode built-in skills outside configured Fabric skill directorie
       OpenCode: {
         async create() {
           return {
-            plugin: { async awaitActivation() {} },
             skill: {
               async list() {
                 return {
                   data: [
-                    { name: "review", location: await realpath(join(skillDirectory, "SKILL.md")) },
-                    { name: "opencode", location: "/opencode-core/skills/opencode/SKILL.md" },
+                    { name: "review", path: await realpath(join(skillDirectory, "SKILL.md")) },
+                    { name: "opencode", path: "/opencode-core/skills/opencode/SKILL.md" },
                   ],
                 };
               },
@@ -423,13 +474,12 @@ test("rejects configured skills with duplicate loaded names", async () => {
       OpenCode: {
         async create() {
           return {
-            plugin: { async awaitActivation() {} },
             skill: {
               async list() {
                 return {
                   data: [
-                    { name: "duplicate", location: await realpath(join(first, "SKILL.md")) },
-                    { name: "duplicate", location: await realpath(join(second, "SKILL.md")) },
+                    { name: "duplicate", path: await realpath(join(first, "SKILL.md")) },
+                    { name: "duplicate", path: await realpath(join(second, "SKILL.md")) },
                   ],
                 };
               },
@@ -465,10 +515,9 @@ test("encodes configured skill paths literally before OpenCode parses configurat
         async create(options) {
           capturedConfig = options.config.content;
           return {
-            plugin: { async awaitActivation() {} },
             skill: {
               async list() {
-                return { data: [{ name: "literal", location: await realpath(join(skillDirectory, "SKILL.md")) }] };
+                return { data: [{ name: "literal", path: await realpath(join(skillDirectory, "SKILL.md")) }] };
               },
             },
             sessions: {

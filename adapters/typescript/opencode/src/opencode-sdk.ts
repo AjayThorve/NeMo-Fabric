@@ -53,6 +53,8 @@ const NONINTERACTIVE_SESSION_PERMISSIONS = [
 // catalog discovery. Keep the Fabric readiness deadline aligned with both.
 const MCP_CONNECTION_TIMEOUT_MS = 65_000;
 const MCP_CONNECTION_POLL_INTERVAL_MS = 50;
+const SKILL_DISCOVERY_TIMEOUT_MS = 5_000;
+const SKILL_DISCOVERY_POLL_INTERVAL_MS = 50;
 const HTTP_HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
 
 function loopbackHostname(hostname: string): boolean {
@@ -199,54 +201,85 @@ async function verifyLoadedSkills(
   if (configured.length === 0) {
     return;
   }
-  let loaded: Array<{ name?: unknown; location?: unknown }>;
-  try {
-    await client.plugin.awaitActivation({ location: { directory: workspace } });
-    loaded = (await client.skill.list({ location: { directory: workspace } })).data;
-  } catch {
-    throw new LifecycleError("opencode_skill_status_unavailable", "OpenCode could not determine the configured skill status");
-  }
-  const byLocation = new Map(
-    loaded
-      .filter((skill): skill is { name: string; location: string } =>
-        typeof skill.name === "string" && typeof skill.location === "string",
-      )
-      .map((skill) => [skill.location, skill]),
-  );
   const configuredLocations = new Set(configured.map((skill) => skill.location));
-  const hasUnexpectedConfiguredSkill = Array.from(byLocation.keys()).some(
-    (location) =>
-      !configuredLocations.has(location) &&
-      configured.some((skill) => {
-        const relativeLocation = relative(skill.directory, location);
-        return relativeLocation !== ".." && !relativeLocation.startsWith(`..${sep}`) && !isAbsolute(relativeLocation);
-      }),
-  );
-  if (hasUnexpectedConfiguredSkill) {
-    throw new LifecycleError(
-      "opencode_skill_unexpected",
-      "OpenCode loaded a skill that was not configured by NeMo Fabric",
-    );
-  }
-  const configuredSkills = configured.map((skill) => byLocation.get(skill.location));
-  if (configuredSkills.some((skill) => skill === undefined)) {
-    throw new LifecycleError(
-      "opencode_skill_load_failed",
-      "OpenCode did not load every configured NeMo Fabric skill",
-    );
-  }
-  const names = new Set<string>();
-  for (const skill of configuredSkills) {
-    if (skill === undefined) {
-      continue;
-    }
-    if (names.has(skill.name)) {
+  // OpenCode catalogs are nonblocking as of 2.0.23. Poll until every configured
+  // skill appears or the bounded discovery window expires.
+  const deadline = Date.now() + SKILL_DISCOVERY_TIMEOUT_MS;
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
       throw new LifecycleError(
-        "opencode_skill_name_duplicate",
-        "Configured NeMo Fabric skills must have distinct names",
+        "opencode_skill_load_failed",
+        "OpenCode did not load every configured NeMo Fabric skill",
       );
     }
-    names.add(skill.name);
+    const signal = AbortSignal.timeout(remainingMs);
+    let loaded: Array<{ name?: unknown; path?: unknown }>;
+    try {
+      loaded = (
+        await client.skill.list(
+          { location: { directory: workspace } },
+          { signal },
+        )
+      ).data;
+    } catch {
+      if (signal.aborted) {
+        throw new LifecycleError(
+          "opencode_skill_load_failed",
+          "OpenCode did not load every configured NeMo Fabric skill",
+        );
+      }
+      throw new LifecycleError("opencode_skill_status_unavailable", "OpenCode could not determine the configured skill status");
+    }
+    const byLocation = new Map(
+      loaded
+        .filter((skill): skill is { name: string; path: string } =>
+          typeof skill.name === "string" && typeof skill.path === "string",
+        )
+        .map((skill) => [skill.path, skill]),
+    );
+    const hasUnexpectedConfiguredSkill = Array.from(byLocation.keys()).some(
+      (location) =>
+        !configuredLocations.has(location) &&
+        configured.some((skill) => {
+          const relativeLocation = relative(skill.directory, location);
+          return relativeLocation !== ".." && !relativeLocation.startsWith(`..${sep}`) && !isAbsolute(relativeLocation);
+        }),
+    );
+    if (hasUnexpectedConfiguredSkill) {
+      throw new LifecycleError(
+        "opencode_skill_unexpected",
+        "OpenCode loaded a skill that was not configured by NeMo Fabric",
+      );
+    }
+    const configuredSkills = configured.map((skill) => byLocation.get(skill.location));
+    if (configuredSkills.every((skill) => skill !== undefined)) {
+      const names = new Set<string>();
+      for (const skill of configuredSkills) {
+        if (names.has(skill.name)) {
+          throw new LifecycleError(
+            "opencode_skill_name_duplicate",
+            "Configured NeMo Fabric skills must have distinct names",
+          );
+        }
+        names.add(skill.name);
+      }
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new LifecycleError(
+        "opencode_skill_load_failed",
+        "OpenCode did not load every configured NeMo Fabric skill",
+      );
+    }
+    const pollDelayMs = Math.min(SKILL_DISCOVERY_POLL_INTERVAL_MS, deadline - Date.now());
+    if (pollDelayMs <= 0) {
+      throw new LifecycleError(
+        "opencode_skill_load_failed",
+        "OpenCode did not load every configured NeMo Fabric skill",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollDelayMs));
   }
 }
 
@@ -602,7 +635,7 @@ export async function loadOpenCodeSdk(
   } catch {
     throw new LifecycleError(
       "opencode_harness_unavailable",
-      "The OpenCode v2 harness is not installed. Install compatible packages with: npm install @opencode/core@2.0.3 @opencode/sdk@2.0.3",
+      "The OpenCode v2 harness is not installed. Install compatible packages with: npm install @opencode/core@2.0.23 @opencode/sdk@2.0.23",
     );
   }
   try {
@@ -614,7 +647,7 @@ export async function loadOpenCodeSdk(
 }
 
 async function loadEmbeddedOpenCodeCreate(): Promise<EmbeddedOpenCodeCreate> {
-  // @opencode/sdk@2.0.3 exposes its two-argument Promise SDK entry point as a
+  // The OpenCode SDK exposes its two-argument Promise SDK entry point as a
   // packaged file but does not export it from the package root. Resolve the
   // package root first so this remains valid when npm hoists dependencies. The
   // adapter exact-pins its Core and SDK peers while this private-file workaround
@@ -799,7 +832,7 @@ export class OpenCodeSdkSessionFactory implements OpenCodeSessionFactory {
       );
       const embedOptions = await this.embedOptionsLoader(configContent);
       // The OpenCode convenience namespace silently ignores the embed argument.
-      // Use the v2.0.3 Promise SDK entry point for production and retain the
+      // Use the Promise SDK entry point for production and retain the
       // public convenience API only for injected unit-test doubles.
       const createEmbeddedClient =
         this.sdkLoader === loadOpenCodeSdk

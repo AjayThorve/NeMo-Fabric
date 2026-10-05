@@ -350,8 +350,8 @@ try {
       "--no-audit",
       "--no-fund",
       "--package-lock=false",
-      "@opencode/core@2.0.3",
-      "@opencode/sdk@2.0.3",
+      "@opencode/core@2.0.23",
+      "@opencode/sdk@2.0.23",
     ],
     consumerRoot,
   );
