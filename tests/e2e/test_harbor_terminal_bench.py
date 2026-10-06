@@ -15,23 +15,12 @@ import os
 import platform
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path, PurePosixPath
 
 import pytest
 import pytest_asyncio
-import toml
 from aiohttp import web
-
-from harbor.environments.docker.docker import _sanitize_docker_compose_project_name
-from harbor.models.environment_type import EnvironmentType
-from harbor.models.trial.config import (
-    AgentConfig,
-    EnvironmentConfig,
-    TaskConfig,
-    TrialConfig,
-)
-from harbor.trial.trial import Trial
-from nemo_fabric.integrations.harbor import FabricAgent
 
 pytestmark = pytest.mark.usefixtures("requires_harbor")
 
@@ -44,6 +33,8 @@ _TASK_HASHES = {
 
 @pytest.fixture(name="fabric_tb21_task")
 def fabric_tb21_task_fixture(tmp_path):
+    from harbor.trial.trial import Trial
+
     if not hasattr(Trial, "create"):
         pytest.skip("requires a qualified Harbor 0.24 host")
     source = os.environ.get("HARBOR_FABRIC_TB21_TASK")
@@ -63,9 +54,13 @@ def fabric_tb21_task_fixture(tmp_path):
     task = tmp_path / "regex-log"
     shutil.copytree(source_path, task)
     config_path = task / "task.toml"
-    config = toml.loads(config_path.read_text())
-    config["environment"]["docker_image"] = image
-    config_path.write_text(toml.dumps(config))
+    config_text = config_path.read_text()
+    original_image = tomllib.loads(config_text)["environment"]["docker_image"]
+    image_line = f"docker_image = {json.dumps(original_image)}"
+    assert config_text.count(image_line) == 1
+    config_path.write_text(
+        config_text.replace(image_line, f"docker_image = {json.dumps(image)}")
+    )
     return task
 
 
@@ -167,6 +162,19 @@ async def fabric_model_server_fixture(fabric_tb21_task, unused_tcp_port):
 async def test_fabric_pi_terminal_bench_trial(
     fabric_tb21_task, fabric_model_server, tmp_path, mode
 ):
+    from harbor.environments.docker.docker import (
+        _sanitize_docker_compose_project_name,
+    )
+    from harbor.models.environment_type import EnvironmentType
+    from harbor.models.trial.config import (
+        AgentConfig,
+        EnvironmentConfig,
+        TaskConfig,
+        TrialConfig,
+    )
+    from harbor.trial.trial import Trial
+    from nemo_fabric.integrations.harbor import FabricAgent
+
     base_url, requests, outcome = fabric_model_server
     outcome["mode"] = mode
     config = TrialConfig(

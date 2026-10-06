@@ -84,6 +84,31 @@
     "additionalProperties": false
   },
   "extension_schemas": {
+    "run_result": {
+      "type": "object",
+      "properties": {
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "harness": {"const": "codex"},
+            "harness_version": {"type": ["string", "null"]},
+            "adapter_version": {"type": ["string", "null"]},
+            "harness_sdk_version": {"type": ["string", "null"]}
+          },
+          "required": ["harness", "harness_version", "adapter_version", "harness_sdk_version"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["provenance"],
+      "additionalProperties": false
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "cached_input_tokens": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
     "run_error": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
