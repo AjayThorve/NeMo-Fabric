@@ -196,12 +196,23 @@ test(
           record.metadata?.turn_seq === 1,
       );
 
+      const { VERSION: harnessVersion } = await import("@earendil-works/pi-coding-agent");
+      const { version: adapterVersion } = JSON.parse(
+        await readFile(new URL("../package.json", import.meta.url), "utf8"),
+      );
+      assert.equal(typeof harnessVersion, "string");
+      assert.equal(typeof adapterVersion, "string");
+      const provenance = {
+        harness: "pi",
+        harness_version: harnessVersion,
+        adapter_version: adapterVersion,
+      };
       assert.equal(first.status, "succeeded");
       assert.equal(first.output.response, "relay smoke ok");
-      assert.deepEqual(first.extensions, { pi_turn_count: 1, pi_turn_started: true });
+      assert.deepEqual(first.extensions, { pi_turn_count: 1, pi_turn_started: true, provenance });
       assert.equal(second.status, "succeeded");
       assert.equal(second.output.response, "relay smoke ok");
-      assert.deepEqual(second.extensions, { pi_turn_count: 2, pi_turn_started: true });
+      assert.deepEqual(second.extensions, { pi_turn_count: 2, pi_turn_started: true, provenance });
       assert.ok(firstSettled.receivedAt - firstCompletedAt < 1_000);
       assert.ok(secondSettled.receivedAt - secondCompletedAt < 1_000);
       assert.equal(providerRequests.length, 2);
