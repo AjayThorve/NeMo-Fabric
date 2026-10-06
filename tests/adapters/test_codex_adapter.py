@@ -196,6 +196,69 @@ def test_codex_usage_ignores_invalid_counts(value):
     assert result.usage is None
 
 
+def test_codex_usage_counts_all_model_responses_in_an_invocation():
+    previous = {"input_tokens": 100}
+    result = adapter._agent_run_result(
+        {"usage": {"total": {"inputTokens": 150}, "last": {"inputTokens": 10}}},
+        previous_usage=previous,
+    )
+    assert result.usage.input_tokens == 50
+
+
+@pytest.mark.parametrize(
+    "gap", [None, {}, {"total": {}}, {"total": {"inputTokens": -1}}]
+)
+def test_codex_usage_gap_rebaselines_without_misattributing_tokens(gap):
+    previous = {}
+    first = adapter._agent_run_result(
+        {"usage": {"total": {"inputTokens": 100}}}, previous_usage=previous
+    )
+    assert first.usage.input_tokens == 100
+    assert (
+        adapter._agent_run_result({"usage": gap}, previous_usage=previous).usage is None
+    )
+    assert (
+        adapter._agent_run_result(
+            {"usage": {"total": {"inputTokens": 150}}}, previous_usage=previous
+        ).usage
+        is None
+    )
+    recovered = adapter._agent_run_result(
+        {"usage": {"total": {"inputTokens": 175}}}, previous_usage=previous
+    )
+    assert recovered.usage.input_tokens == 25
+
+
+def test_codex_usage_reset_rebaselines_without_suppressing_future_counts():
+    previous = {"input_tokens": 100, "output_tokens": 25}
+    reset = adapter._agent_run_result(
+        {"usage": {"total": {"inputTokens": 10, "outputTokens": 30}}},
+        previous_usage=previous,
+    )
+    assert reset.usage is None
+    recovered = adapter._agent_run_result(
+        {"usage": {"total": {"inputTokens": 25, "outputTokens": 35}}},
+        previous_usage=previous,
+    )
+    assert recovered.usage.input_tokens == 15
+    assert recovered.usage.output_tokens == 5
+
+
+def test_codex_partial_usage_only_invalidates_missing_fields():
+    previous = {"input_tokens": 100, "output_tokens": 25}
+    partial = adapter._agent_run_result(
+        {"usage": {"total": {"inputTokens": 125}}}, previous_usage=previous
+    )
+    assert partial.usage.input_tokens == 25
+    assert partial.usage.output_tokens is None
+    recovered = adapter._agent_run_result(
+        {"usage": {"total": {"inputTokens": 150, "outputTokens": 40}}},
+        previous_usage=previous,
+    )
+    assert recovered.usage.input_tokens == 25
+    assert recovered.usage.output_tokens is None
+
+
 def mock_turn_handle(result=None):
     mock_handle = MagicMock(spec=AsyncTurnHandle)
     outcome = successful_result() if result is None else result

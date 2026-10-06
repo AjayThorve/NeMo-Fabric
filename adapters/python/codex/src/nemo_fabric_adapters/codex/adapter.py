@@ -1024,7 +1024,7 @@ def sdk_failure(error: BaseException) -> dict[str, Any]:
 def _agent_run_result(
     output: dict[str, Any],
     *,
-    previous_usage: dict[str, int] | None = None,
+    previous_usage: dict[str, int | None] | None = None,
     harness_version: str | None = None,
 ) -> AgentRunResult:
     normalized = dict(output)
@@ -1046,26 +1046,41 @@ def _agent_run_result(
     nested = usage.get("total")
     if isinstance(nested, dict):
         usage = nested
+    token_names = {
+        "input_tokens": "inputTokens",
+        "output_tokens": "outputTokens",
+        "total_tokens": "totalTokens",
+        "cached_input_tokens": "cachedInputTokens",
+    }
     tokens = {
         name: value
-        for name, alias in {
-            "input_tokens": "inputTokens",
-            "output_tokens": "outputTokens",
-            "total_tokens": "totalTokens",
-            "cached_input_tokens": "cachedInputTokens",
-        }.items()
+        for name, alias in token_names.items()
         if isinstance((value := usage.get(name, usage.get(alias))), int)
         and not isinstance(value, bool)
         and 0 <= value <= (1 << 64) - 1
     }
-    if isinstance(nested, dict) and previous_usage is not None:
-        totals = dict(tokens)
-        tokens = {
-            name: value - previous_usage.get(name, 0)
-            for name, value in totals.items()
-            if value >= previous_usage.get(name, 0)
-        }
-        previous_usage.update(totals)
+    if previous_usage is not None:
+        totals = dict(tokens) if isinstance(nested, dict) else {}
+        if isinstance(nested, dict):
+            # `last` counts only the latest model response, not the entire
+            # tool-using invocation. A gap or reset makes its delta unknown.
+            reset = any(
+                value < baseline
+                for name, value in totals.items()
+                if (baseline := previous_usage.get(name, 0)) is not None
+            )
+            tokens = (
+                {}
+                if reset
+                else {
+                    name: value - baseline
+                    for name, value in totals.items()
+                    if (baseline := previous_usage.get(name, 0)) is not None
+                }
+            )
+        # Invalidate missing fields instead of attributing several invocations
+        # to the next one. The next snapshot re-establishes their baselines.
+        previous_usage.update({name: totals.get(name) for name in token_names})
     cached = tokens.pop("cached_input_tokens", None)
     agent_usage = (
         AgentUsage(
@@ -1323,7 +1338,7 @@ class CodexRuntime:
         self._api_key_home: tempfile.TemporaryDirectory | None = None
         self._mcp_authentication_checked = False
         self._unusable = False
-        self._usage_totals: dict[str, int] = {}
+        self._usage_totals: dict[str, int | None] = {}
         self._harness_version: str | None = None
 
     async def start(self, payload: dict[str, Any]) -> None:

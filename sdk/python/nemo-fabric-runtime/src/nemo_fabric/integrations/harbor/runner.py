@@ -60,16 +60,45 @@ def execution_provenance(payload: FabricRunPayload) -> dict[str, str | None]:
         except importlib.metadata.PackageNotFoundError:
             return None
 
+    adapter_version = (
+        version("nemo-fabric-adapters-codex") if harness == "codex" else None
+    )
+    if harness == "pi":
+        adapter_version = _pi_adapter_version(payload)
     return {
         "harness": harness,
         "harness_version": None,
         "adapter_id": adapter_id,
-        "adapter_version": version("nemo-fabric-adapters-codex")
-        if harness == "codex"
-        else None,
+        "adapter_version": adapter_version,
         "harness_sdk_version": version("openai-codex") if harness == "codex" else None,
         "fabric_runtime_version": version("nemo-fabric-runtime"),
     }
+
+
+def _pi_adapter_version(payload: FabricRunPayload) -> str | None:
+    """Read metadata beside the selected descriptor without starting Pi."""
+
+    try:
+        plan = Fabric().plan(payload.config, base_dir=payload.config_base_dir)
+    except FabricError:
+        return None
+    resolved = plan.get("adapter_descriptor", {})
+    provenance = resolved.get("provenance", [])
+    if not provenance:
+        return None
+    # Core resolves descriptor-local runner paths against the primary root.
+    package_path = Path(provenance[0]["root"]) / "package.json"
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (
+        not isinstance(package, dict)
+        or package.get("name") != "nemo-fabric-adapters-pi"
+    ):
+        return None
+    version = package.get("version")
+    return version if isinstance(version, str) and version.strip() else None
 
 
 def main() -> None:

@@ -236,6 +236,10 @@ async def test_fabric_pi_terminal_bench_trial(
         assert result.agent_result is not None
         assert result.agent_result.metadata is not None
         assert result.agent_result.metadata["fabric"]["status"] == "failed"
+        assert (
+            result.agent_result.metadata["fabric"]["provenance"]["adapter_version"]
+            == "0.5.0"
+        )
         assert "runner_error" in document or document["status"] == "failed"
     for path in trial.paths.trial_dir.rglob("*"):
         if path.is_file():

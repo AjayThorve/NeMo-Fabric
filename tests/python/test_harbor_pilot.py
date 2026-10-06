@@ -229,6 +229,83 @@ def test_runner_failure_provenance_is_explicit_when_versions_unknown(
     }
 
 
+@pytest.fixture(name="pi_provenance")
+def pi_provenance_fixture(tmp_path, monkeypatch):
+    from nemo_fabric import Fabric, RunPlan
+    from nemo_fabric.integrations.harbor import FabricAgent, runner
+
+    payload = FabricAgent(
+        logs_dir=tmp_path, fabric_adapter_id="nvidia.fabric.pi"
+    )._build_spec("test")
+    mock_plan = MagicMock(spec=RunPlan)
+    mock_plan.get.return_value = {
+        "provenance": [{"root": str(tmp_path)}, {"root": "/unselected/adapter"}]
+    }
+    mock_fabric = MagicMock(spec=Fabric)
+    mock_fabric.plan.return_value = mock_plan
+    monkeypatch.setattr(runner, "Fabric", MagicMock(return_value=mock_fabric))
+    return payload, tmp_path / "package.json"
+
+
+def test_runner_pi_lifecycle_failure_retains_selected_adapter_version(
+    pi_provenance, tmp_path, monkeypatch
+):
+    import sys
+    from nemo_fabric import FabricRuntimeError
+    from nemo_fabric.integrations.harbor import runner
+
+    payload, package_path = pi_provenance
+    package_path.write_text(
+        json.dumps({"name": "nemo-fabric-adapters-pi", "version": "0.5.0"}),
+        encoding="utf-8",
+    )
+    spec_path = tmp_path / "spec.json"
+    result_path = tmp_path / "result.json"
+    spec_path.write_text(payload.model_dump_json(), encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", ["runner", "--spec", str(spec_path), "--result", str(result_path)]
+    )
+    monkeypatch.setattr(
+        runner, "run", AsyncMock(side_effect=FabricRuntimeError("startup failed"))
+    )
+    with pytest.raises(FabricRuntimeError, match="startup failed"):
+        runner.main()
+    document = json.loads(result_path.read_text())
+    assert document["provenance"]["adapter_version"] == "0.5.0"
+    assert document["provenance"]["harness_version"] is None
+    assert document["runner_error"]["message"] == "startup failed"
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        None,
+        "not json",
+        "[]",
+        '{"name": "different-adapter", "version": "0.5.0"}',
+        '{"name": "nemo-fabric-adapters-pi"}',
+        '{"name": "nemo-fabric-adapters-pi", "version": 5}',
+        '{"name": "nemo-fabric-adapters-pi", "version": " "}',
+    ],
+)
+def test_runner_pi_unavailable_version_does_not_mask_failure(pi_provenance, contents):
+    from nemo_fabric.integrations.harbor import runner
+
+    payload, package_path = pi_provenance
+    if contents is not None:
+        package_path.write_text(contents, encoding="utf-8")
+    assert runner.execution_provenance(payload)["adapter_version"] is None
+
+
+def test_runner_pi_unresolved_descriptor_keeps_version_unknown(pi_provenance):
+    from nemo_fabric import FabricConfigError
+    from nemo_fabric.integrations.harbor import runner
+
+    payload, _ = pi_provenance
+    runner.Fabric.return_value.plan.side_effect = FabricConfigError("cannot resolve Pi")
+    assert runner.execution_provenance(payload)["adapter_version"] is None
+
+
 @pytest.mark.parametrize(
     "usage",
     [

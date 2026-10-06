@@ -156,12 +156,7 @@ gateway and passes its explicit `base_url` to Relay as the upstream endpoint.
 
 ## Testing
 
-Normalized usage reports invocation-local token counts. The adapter subtracts
-the previous SDK thread totals across repeated invocations; input counts already
-include cached tokens, which are also available as
-`usage.metadata.cached_input_tokens` in the Fabric result. Unknown cost remains
-unavailable. Adapter result metadata records the actual initialized app-server
-version separately from the SDK and adapter package versions.
+Normalized usage reports invocation-local token counts. The adapter subtracts the previous SDK thread totals across repeated invocations, covering every model response in a tool-using invocation rather than only the latest response. Missing usage fields invalidate their baselines; the next snapshot re-establishes them without attributing intervening tokens to that invocation. A counter reset also leaves that invocation's accounting unavailable and establishes a new baseline. Input counts already include cached tokens, which are also available as `usage.metadata.cached_input_tokens` in the NeMo Fabric result. Unknown cost remains unavailable. Adapter result metadata records the actual initialized app-server version separately from the SDK and adapter package versions.
 
 Run the unit and opt-in real SDK tests separately:
 
