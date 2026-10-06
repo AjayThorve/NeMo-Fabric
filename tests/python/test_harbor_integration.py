@@ -440,7 +440,7 @@ def test_harbor_propagates_runtime_identity(tmp_path: Path):
         "harbor_session_id": "trial__agent",
         "harbor_context_id": "594025f3-7d65-4655-8576-4bee95002eae",
     }
-    assert agent.SUPPORTS_ATIF is True
+    assert agent.SUPPORTS_ATIF is False
 
 
 async def test_harbor_structured_package_install_is_shell_safe(tmp_path: Path):

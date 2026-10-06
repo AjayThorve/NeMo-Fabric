@@ -160,6 +160,10 @@ async def test_harbor_fabric_agent_runs_nooa_bench_adapter(
         "Create a task completion artifact.\nReturn verifiable evidence.\n"
     )
     assert context.metadata["fabric"]["status"] == "succeeded"
+    assert context.n_input_tokens == 12
+    assert context.n_output_tokens == 4
+    assert context.n_cache_tokens is None
+    assert context.cost_usd is None
     assert context.metadata["fabric"]["adapter_id"] == (
         "nvidia.fabric.nooa.bench-agent"
     )

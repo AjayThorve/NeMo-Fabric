@@ -52,11 +52,30 @@
     "additionalProperties": false
   },
   "extension_schemas": {
+    "usage": {
+      "type": "object",
+      "properties": {
+        "cached_input_tokens": {"type": "integer", "minimum": 0},
+        "cache_write_tokens": {"type": "integer", "minimum": 0},
+        "estimated_cost_usd": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
     "run_result": {
       "type": "object",
       "properties": {
         "pi_turn_count": {"type": "integer", "minimum": 0},
-        "pi_turn_started": {"type": "boolean"}
+        "pi_turn_started": {"type": "boolean"},
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "harness": {"const": "pi"},
+            "harness_version": {"type": "string"},
+            "adapter_version": {"type": "string"}
+          },
+          "required": ["harness", "harness_version", "adapter_version"],
+          "additionalProperties": false
+        }
       },
       "required": ["pi_turn_count", "pi_turn_started"],
       "additionalProperties": false

@@ -10,11 +10,21 @@ import { createServer } from "node:http";
 
 import {
   modelAwareCompactionReserveTokens,
+  invocationUsage,
   PiSdkSessionFactory,
   resolveCustomTools,
   withCustomBaseUrl,
 } from "../dist/pi-sdk.js";
 import { PiAdapterRuntime } from "../dist/runtime.js";
+
+test("normalizes per-invocation Pi usage including cache reads and writes", () => {
+  const usage = { input: 10, output: 5, cacheRead: 20, cacheWrite: 3, totalTokens: 38, cost: { total: 0.25 } };
+  assert.equal(invocationUsage([]), undefined);
+  assert.deepEqual(invocationUsage([usage, usage]), {
+    input_tokens: 66, output_tokens: 10, total_tokens: 76,
+    extensions: { cached_input_tokens: 40, cache_write_tokens: 6, estimated_cost_usd: 0.5 },
+  });
+});
 
 test("uses standard content when replaying reasoning through a custom model proxy", () => {
   const catalogModel = {

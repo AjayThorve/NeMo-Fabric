@@ -164,6 +164,38 @@ def test_agent_run_result_discards_oversized_token_count():
     assert result.usage is None
 
 
+@pytest.mark.parametrize("style", ["camel", "snake"])
+def test_codex_cumulative_usage_becomes_invocation_deltas(style):
+    names = (
+        ("inputTokens", "cachedInputTokens", "outputTokens", "totalTokens")
+        if style == "camel"
+        else ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens")
+    )
+    previous = {}
+    first = adapter._agent_run_result(
+        {"usage": {"total": dict(zip(names, (100, 40, 25, 125), strict=True))}},
+        previous_usage=previous,
+    )
+    second = adapter._agent_run_result(
+        {"usage": {"total": dict(zip(names, (150, 60, 40, 190), strict=True))}},
+        previous_usage=previous,
+    )
+    assert first.usage.input_tokens == 100
+    assert second.usage.input_tokens == 50
+    assert second.usage.output_tokens == 15
+    assert second.usage.total_tokens == 65
+    assert second.usage.extensions == {"cached_input_tokens": 20}
+    assert second.usage.cost_usd is None
+
+
+@pytest.mark.parametrize("value", [-1, True, 1.5, "10", 1 << 64])
+def test_codex_usage_ignores_invalid_counts(value):
+    result = adapter._agent_run_result(
+        {"usage": {"total": {"inputTokens": value, "cachedInputTokens": value}}}
+    )
+    assert result.usage is None
+
+
 def mock_turn_handle(result=None):
     mock_handle = MagicMock(spec=AsyncTurnHandle)
     outcome = successful_result() if result is None else result
@@ -287,6 +319,9 @@ def mock_codex_fixture(monkeypatch):
         mock_client.config = config
         mock_client.closed = False
         mock_client.thread = None
+        mock_client.metadata = SimpleNamespace(
+            serverInfo=SimpleNamespace(version="0.144.4")
+        )
         mock_client._client = SimpleNamespace(
             request=mock_codex.skill_request,
             next_notification=mock_codex.next_notification,
@@ -485,6 +520,24 @@ def test_runtime_stop_reports_close_failure_after_completed_turn(
     assert error.code == "codex_sdk_stop_failed"
     assert "Codex SDK client failed to close" in caplog.text
     mock_codex.instances[0].close.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize("failed", [False, True])
+async def test_codex_retains_actual_app_server_version(
+    codex_payload, mock_codex, failed
+):
+    if failed:
+        mock_codex.next_result = successful_result()
+        mock_codex.next_result.status = TurnStatus.failed
+        mock_codex.next_result.final_response = None
+    runtime = adapter.CodexRuntime()
+    await runtime.start(lifecycle_start_payload(codex_payload))
+    try:
+        result = await runtime.invoke(*lifecycle_invocation(codex_payload))
+        assert result.extensions["provenance"]["harness_version"] == "0.144.4"
+        assert result.extensions["provenance"]["harness_sdk_version"] is not None
+    finally:
+        await runtime.stop()
 
 
 def test_start_failure_is_not_masked_by_sdk_close_failure(
@@ -1217,17 +1270,19 @@ async def test_relay_atif_timeout_fails_successful_turn_explicitly(
 
     await runtime.start(lifecycle_start_payload(codex_payload))
     try:
-        output = result_view(await runtime.invoke(*lifecycle_invocation(codex_payload)))
+        result = await runtime.invoke(*lifecycle_invocation(codex_payload))
+        output = result_view(result)
         late_atif.write_text(
             '{"schema_version":"ATIF-v1.7","steps":[]}', encoding="utf-8"
         )
-        unavailable = result_view(
-            await runtime.invoke(*lifecycle_invocation(codex_payload))
-        )
+        unavailable_result = await runtime.invoke(*lifecycle_invocation(codex_payload))
+        unavailable = result_view(unavailable_result)
     finally:
         await runtime.stop()
 
     assert output["failed"] is True
+    assert result.extensions["provenance"]["harness_version"] == "0.144.4"
+    assert unavailable_result.extensions["provenance"]["harness_version"] == "0.144.4"
     assert output["error"] == {
         "code": "codex_relay_atif_timeout",
         "message": "NeMo Relay did not finalize an ATIF artifact before the deadline",

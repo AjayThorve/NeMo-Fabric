@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import json
 import logging
 import math
@@ -1020,7 +1021,12 @@ def sdk_failure(error: BaseException) -> dict[str, Any]:
     )
 
 
-def _agent_run_result(output: dict[str, Any]) -> AgentRunResult:
+def _agent_run_result(
+    output: dict[str, Any],
+    *,
+    previous_usage: dict[str, int] | None = None,
+    harness_version: str | None = None,
+) -> AgentRunResult:
     normalized = dict(output)
     failed = bool(normalized.pop("failed", False))
     reported_error = normalized.pop("error", None)
@@ -1036,20 +1042,60 @@ def _agent_run_result(output: dict[str, Any]) -> AgentRunResult:
         )
     raw_usage = normalized.get("usage")
     usage = raw_usage if isinstance(raw_usage, dict) else {}
+    # The SDK reports cumulative thread totals, not invocation-local counts.
+    nested = usage.get("total")
+    if isinstance(nested, dict):
+        usage = nested
     tokens = {
         name: value
-        for name in ("input_tokens", "output_tokens", "total_tokens")
-        if isinstance((value := usage.get(name)), int)
+        for name, alias in {
+            "input_tokens": "inputTokens",
+            "output_tokens": "outputTokens",
+            "total_tokens": "totalTokens",
+            "cached_input_tokens": "cachedInputTokens",
+        }.items()
+        if isinstance((value := usage.get(name, usage.get(alias))), int)
         and not isinstance(value, bool)
         and 0 <= value <= (1 << 64) - 1
     }
-    agent_usage = AgentUsage(**tokens) if tokens else None
+    if isinstance(nested, dict) and previous_usage is not None:
+        totals = dict(tokens)
+        tokens = {
+            name: value - previous_usage.get(name, 0)
+            for name, value in totals.items()
+            if value >= previous_usage.get(name, 0)
+        }
+        previous_usage.update(totals)
+    cached = tokens.pop("cached_input_tokens", None)
+    agent_usage = (
+        AgentUsage(
+            **tokens,
+            extensions={"cached_input_tokens": cached} if cached is not None else {},
+        )
+        if tokens or cached is not None
+        else None
+    )
     return AgentRunResult(
         status=AgentRunStatus.FAILED if failed else AgentRunStatus.SUCCEEDED,
         output=normalized,
         error=error,
         usage=agent_usage,
+        extensions={
+            "provenance": {
+                "harness": "codex",
+                "harness_version": harness_version,
+                "adapter_version": _package_version("nemo-fabric-adapters-codex"),
+                "harness_sdk_version": _package_version("openai-codex"),
+            }
+        },
     )
+
+
+def _package_version(distribution: str) -> str | None:
+    try:
+        return importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def normalize_result(
@@ -1277,6 +1323,8 @@ class CodexRuntime:
         self._api_key_home: tempfile.TemporaryDirectory | None = None
         self._mcp_authentication_checked = False
         self._unusable = False
+        self._usage_totals: dict[str, int] = {}
+        self._harness_version: str | None = None
 
     async def start(self, payload: dict[str, Any]) -> None:
         if self._client is not None:
@@ -1361,6 +1409,12 @@ class CodexRuntime:
         self._base_dir = base_dir
         self._fabric_runtime_id = fabric_runtime_id
         self._thread = thread
+        server_info = client.metadata.serverInfo
+        self._harness_version = (
+            server_info.version
+            if server_info is not None and isinstance(server_info.version, str)
+            else None
+        )
 
     async def invoke(
         self,
@@ -1392,7 +1446,8 @@ class CodexRuntime:
                 _failure(
                     "codex_runtime_unavailable",
                     "Codex runtime cannot accept another invocation after a runtime failure",
-                )
+                ),
+                harness_version=self._harness_version,
             )
 
         try:
@@ -1441,7 +1496,8 @@ class CodexRuntime:
                             ),
                             relay,
                             artifacts=[],
-                        )
+                        ),
+                        harness_version=self._harness_version,
                     )
         except AdapterRelayError as error:
             output = adapter_failure(error)
@@ -1453,7 +1509,11 @@ class CodexRuntime:
         self._unusable = not usable
         if self._relay is not None:
             output = _relay_output(output, self._relay)
-        return _agent_run_result(output)
+        return _agent_run_result(
+            output,
+            previous_usage=self._usage_totals,
+            harness_version=self._harness_version,
+        )
 
     async def stop(self) -> None:
         client = self._client
@@ -1465,6 +1525,8 @@ class CodexRuntime:
         self._fabric_runtime_id = None
         self._mcp_authentication_checked = False
         self._unusable = True
+        self._usage_totals.clear()
+        self._harness_version = None
 
         close_error: BaseException | None = None
         try:

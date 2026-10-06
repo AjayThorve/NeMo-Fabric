@@ -6,6 +6,7 @@
 // extensions, custom tools, and workspace containment.
 
 import { realpath, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type {
@@ -14,7 +15,8 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { createJiti } from "jiti/static";
-import type { AgentConfig, AgentModelConfig, AgentToolDefinition, JsonObject } from "nemo-fabric-adapter-contract";
+import type { Usage } from "@earendil-works/pi-ai";
+import type { AgentConfig, AgentModelConfig, AgentToolDefinition, AgentUsage, JsonObject } from "nemo-fabric-adapter-contract";
 import { LifecycleError, type AdapterStartInput } from "nemo-fabric-adapters-common";
 
 import {
@@ -74,6 +76,7 @@ const PI_HARNESS_INSTALL_COMMAND =
   "npm install @earendil-works/pi-ai@^0.86.0 @earendil-works/pi-coding-agent@^0.86.0";
 
 interface PiSdkModules {
+  VERSION: string;
   InMemoryCredentialStore: typeof import("@earendil-works/pi-ai").InMemoryCredentialStore;
   createAgentSession: typeof import("@earendil-works/pi-coding-agent").createAgentSession;
   DefaultResourceLoader: typeof import("@earendil-works/pi-coding-agent").DefaultResourceLoader;
@@ -124,6 +127,7 @@ async function loadPiSdk(): Promise<PiSdkModules> {
   }
 
   return {
+    VERSION: codingAgent.VERSION,
     InMemoryCredentialStore: ai.InMemoryCredentialStore,
     createAgentSession: codingAgent.createAgentSession,
     DefaultResourceLoader: codingAgent.DefaultResourceLoader,
@@ -390,18 +394,39 @@ function unsupportedSessionAction(name: string): never {
   throw new LifecycleError("pi_unsupported_session_operation", `Pi session operation ${name} is not supported`);
 }
 
+export function invocationUsage(messages: Usage[]): AgentUsage | undefined {
+  if (messages.length === 0) return undefined;
+  return {
+    input_tokens: messages.reduce((total, usage) => total + usage.input + usage.cacheRead + usage.cacheWrite, 0),
+    output_tokens: messages.reduce((total, usage) => total + usage.output, 0),
+    total_tokens: messages.reduce((total, usage) => total + usage.totalTokens, 0),
+    // Pi's cost is a catalog estimate, not a provider-reported charge.
+    extensions: {
+      cached_input_tokens: messages.reduce((total, usage) => total + usage.cacheRead, 0),
+      cache_write_tokens: messages.reduce((total, usage) => total + usage.cacheWrite, 0),
+      estimated_cost_usd: messages.reduce((total, usage) => total + usage.cost.total, 0),
+    },
+  };
+}
+
 class PiSdkSessionHandle implements PiSessionHandle {
   readonly relay?: PiRelayRuntime;
+  readonly provenance: JsonObject;
   private readonly session: AgentSession;
   private readonly state: { shutdownRequested: boolean };
   private readonly unsubscribeTurnCounter: () => void;
   private stopped = false;
   private cumulativeTurnCount = 0;
 
-  constructor(session: AgentSession, state: { shutdownRequested: boolean }, relay?: PiRelayRuntime) {
+  constructor(session: AgentSession, state: { shutdownRequested: boolean }, harnessVersion: string, relay?: PiRelayRuntime) {
     this.session = session;
     this.state = state;
     this.relay = relay;
+    this.provenance = {
+      harness: "pi",
+      harness_version: harnessVersion,
+      adapter_version: createRequire(import.meta.url)("../package.json").version,
+    };
     this.unsubscribeTurnCounter = this.session.subscribe((event) => {
       if (event.type === "turn_start") {
         this.cumulativeTurnCount += 1;
@@ -416,6 +441,7 @@ class PiSdkSessionHandle implements PiSessionHandle {
   async prompt(text: string): Promise<PiPromptOutcome> {
     let accepted = false;
     let turnStarted = false;
+    const usage: Usage[] = [];
     let finalAssistant:
       | { role: "assistant"; content: unknown; stopReason: string; errorMessage?: string }
       | undefined;
@@ -425,6 +451,7 @@ class PiSdkSessionHandle implements PiSessionHandle {
       }
       if (event.type === "message_end" && event.message.role === "assistant") {
         finalAssistant = event.message;
+        usage.push(event.message.usage);
       }
     });
     try {
@@ -446,6 +473,7 @@ class PiSdkSessionHandle implements PiSessionHandle {
       stopReason: finalAssistant?.stopReason,
       errorMessage: finalAssistant?.errorMessage,
       shutdownRequested: this.state.shutdownRequested,
+      usage: invocationUsage(usage),
     };
   }
 
@@ -643,7 +671,7 @@ export class PiSdkSessionFactory implements PiSessionFactory {
         tools: enabled === null ? undefined : enabled,
         excludeTools: blocked,
       });
-      handle = new PiSdkSessionHandle(session, state, relay);
+      handle = new PiSdkSessionHandle(session, state, pi.VERSION, relay);
       const blockedNames = new Set(blocked);
       const availableNames = new Set(session.getAllTools().map((tool) => tool.name));
       const missing = (enabled ?? []).filter((name) => !blockedNames.has(name) && !availableNames.has(name));

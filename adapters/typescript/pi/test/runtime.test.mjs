@@ -34,6 +34,23 @@ function startInput() {
 
 const context = startInput().runtimeContext;
 
+for (const stopReason of ["stop", "error", "aborted"]) {
+  test(`retains Pi usage and provenance for ${stopReason}`, async () => {
+    const usage = { input_tokens: 10, output_tokens: 3, total_tokens: 13, extensions: { cached_input_tokens: 4 } };
+    const provenance = { harness: "pi", harness_version: "0.86.0", adapter_version: "0.5.0" };
+    const runtime = new PiAdapterRuntime({ async create() { return {
+      provenance,
+      async prompt() { return { accepted: true, turnStarted: true, turnCount: 1, text: "done", stopReason, usage }; },
+      async stop() {},
+    }; } });
+    await runtime.start(startInput());
+    const result = await runtime.invoke({ input: "test" }, context);
+    assert.deepEqual(result.usage, usage);
+    assert.deepEqual(result.extensions.provenance, provenance);
+    await runtime.stop();
+  });
+}
+
 test("declares the cumulative Pi turn count in every run result", async () => {
   const descriptor = JSON.parse(
     await readFile(new URL("../pi.fabric-adapter.json", import.meta.url), "utf8"),
@@ -44,6 +61,16 @@ test("declares the cumulative Pi turn count in every run result", async () => {
     properties: {
       pi_turn_count: { type: "integer", minimum: 0 },
       pi_turn_started: { type: "boolean" },
+      provenance: {
+        type: "object",
+        properties: {
+          harness: { const: "pi" },
+          harness_version: { type: "string" },
+          adapter_version: { type: "string" },
+        },
+        required: ["harness", "harness_version", "adapter_version"],
+        additionalProperties: false,
+      },
     },
     required: ["pi_turn_count", "pi_turn_started"],
     additionalProperties: false,

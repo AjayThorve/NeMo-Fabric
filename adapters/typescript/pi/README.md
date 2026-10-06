@@ -261,6 +261,15 @@ separate terminal `result`. Redirect-decision marks remain in configured Relay
 ATOF artifacts; Pi's startup marks are not included in `atof_records`. MCP is
 not currently supported.
 
+## Usage And Provenance
+
+The adapter sums Pi assistant-message usage within each invocation. Input counts
+include fresh tokens, cache reads, and cache writes; usage metadata retains the
+cache breakdown. Pi's catalog cost estimate is recorded as
+`usage.metadata.estimated_cost_usd`, not as a provider-reported charge. The
+actual loaded Pi SDK version and adapter package version are retained in result
+metadata on both successful and unsuccessful invocations.
+
 ## Dependency Rationale
 
 `@earendil-works/pi-coding-agent` provides the native Pi session, resources,

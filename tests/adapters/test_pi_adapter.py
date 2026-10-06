@@ -77,6 +77,16 @@ def test_pi_descriptor_declares_the_supported_surface():
         "properties": {
             "pi_turn_count": {"type": "integer", "minimum": 0},
             "pi_turn_started": {"type": "boolean"},
+            "provenance": {
+                "type": "object",
+                "properties": {
+                    "harness": {"const": "pi"},
+                    "harness_version": {"type": "string"},
+                    "adapter_version": {"type": "string"},
+                },
+                "required": ["harness", "harness_version", "adapter_version"],
+                "additionalProperties": False,
+            },
         },
         "required": ["pi_turn_count", "pi_turn_started"],
         "additionalProperties": False,

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.metadata
 import json
 import shlex
@@ -14,6 +15,7 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 from typing import Literal
+from typing import NoReturn
 from typing import cast
 
 from pydantic import Field
@@ -23,6 +25,7 @@ from pydantic import model_validator
 from nemo_fabric import EnvironmentConfig
 from nemo_fabric import DiscoveryConfig
 from nemo_fabric import FabricConfig
+from nemo_fabric import FabricConfigError
 from nemo_fabric import HarnessConfig
 from nemo_fabric import InstructionConfig
 from nemo_fabric import InstructionsConfig
@@ -188,6 +191,14 @@ else:
                 )
             return value
 
+        @field_validator("fabric_environment_env")
+        @classmethod
+        def validate_environment_env(
+            cls, value: dict[str, str] | None
+        ) -> dict[str, str] | None:
+            FabricRunPayload.validate_env_names(tuple(value or {}))
+            return value
+
         @field_validator("fabric_discovery_paths")
         @classmethod
         def validate_discovery_paths(cls, value: list[str] | None) -> list[str] | None:
@@ -239,18 +250,9 @@ else:
         reward calculation. NeMo Fabric owns the selected agent harness invocation.
         """
 
-        # Current Harbor main gates task skills and MCP servers on these fields;
-        # the published 0.23.0 capabilities model does not define them yet.
-        capabilities = AgentCapabilities.model_validate(
-            {
-                "atif": True,
-                **{
-                    field: True
-                    for field in ("skills", "mcp_servers")
-                    if field in AgentCapabilities.model_fields
-                },
-            }
-        )
+        # Class-level discovery must not promise features for every adapter.
+        # Instances qualify the initial Pi/Codex pilot below.
+        capabilities = AgentCapabilities()
         options_model = FabricAgentOptions
         options: FabricAgentOptions
 
@@ -325,6 +327,13 @@ else:
             self.fabric_max_turns = options.fabric_max_turns
             self.fabric_runtime_timeout_seconds = options.fabric_runtime_timeout_seconds
             self.fabric_environment_env = dict(options.fabric_environment_env or {})
+            for name, value in self.fabric_environment_env.items():
+                if name in self._extra_env and self._extra_env[name] != value:
+                    raise ValueError(
+                        f"{name} has conflicting values in extra_env and fabric_environment_env"
+                    )
+                # Harbor scrubs sensitive values collected from extra_env.
+                self._extra_env[name] = value
             self.fabric_blocked_tools = list(options.fabric_blocked_tools or [])
             self.fabric_enabled_tools = (
                 list(options.fabric_enabled_tools)
@@ -338,6 +347,31 @@ else:
             self.fabric_install_command = options.fabric_install_command
             self.fabric_cwd = options.fabric_cwd
             self.fabric_timeout_sec = options.fabric_timeout_sec
+            pilot_adapter = self.fabric_adapter_id in {
+                "nvidia.fabric.pi",
+                "nvidia.fabric.codex",
+            }
+            self.capabilities = AgentCapabilities.model_validate(
+                {
+                    "atif": pilot_adapter and self.fabric_telemetry == "relay",
+                    **{
+                        name: supported
+                        for name, supported in {
+                            "skills": pilot_adapter,
+                            "mcp_servers": self.fabric_adapter_id
+                            == "nvidia.fabric.codex",
+                        }.items()
+                        if name in AgentCapabilities.model_fields
+                    },
+                }
+            )
+            # Harbor 0.23 still reads the deprecated instance flag.
+            self.SUPPORTS_ATIF = self.capabilities.atif
+            if self.fabric_adapter_id == "nvidia.fabric.pi" and self.mcp_servers:
+                raise ValueError(
+                    "The Fabric Pi adapter does not support MCP servers; "
+                    "select an MCP-capable adapter such as nvidia.fabric.codex"
+                )
             if self.fabric_install_command:
                 warnings.warn(
                     "fabric_install_command is deprecated; use fabric_package",
@@ -422,10 +456,30 @@ else:
                 env=self._runner_env,
                 timeout_sec=self.fabric_timeout_sec,
             )
-            ensure_success("NeMo Fabric run failed", result)
-
-            await environment.download_file(remote_result_path, host_result_path)
+            try:
+                await environment.download_file(remote_result_path, host_result_path)
+            except Exception:
+                # Import failures and abrupt termination can leave no result.
+                # Keep the runner's original error instead of a download error.
+                ensure_success("NeMo Fabric run failed", result)
+                raise
             self._result_path = host_result_path
+            try:
+                document = json.loads(host_result_path.read_text(encoding="utf-8"))
+                if "runner_error" in document:
+                    raise_run_failure("failed", document["runner_error"])
+                normalized = RunResult.from_mapping(document)
+            except (ValueError, FabricConfigError):
+                ensure_success("NeMo Fabric run failed", result)
+                raise
+            if normalized.status != "succeeded" or normalized.error is not None:
+                raise_run_failure(
+                    normalized.status,
+                    normalized.error.to_mapping()
+                    if normalized.error is not None
+                    else None,
+                )
+            ensure_success("NeMo Fabric run failed", result)
 
         def _build_request(self, instruction: str) -> RunRequest:
             context = {"source": "harbor"}
@@ -438,10 +492,16 @@ else:
             return RunRequest(input=instruction, context=context)
 
         def _build_spec(self, instruction: str) -> FabricRunPayload:
+            config = self._build_config()
+            # Transport variable names, never user-provided environment values.
+            # The runner reconstructs these from its Harbor-managed exec env.
+            for name in self.fabric_environment_env:
+                config.environment.env.pop(name, None)
             return FabricRunPayload(
-                config=self._build_config(),
+                config=config,
                 config_base_dir=self._environment_config_base_dir,
                 request=self._build_request(instruction),
+                environment_env_names=tuple(self.fabric_environment_env),
             )
 
         def _build_config(self) -> FabricConfig:
@@ -740,13 +800,39 @@ def ensure_success(message: str, result: Any) -> None:
     raise RuntimeError(f"{message} (exit {result.return_code}): {stderr or stdout}")
 
 
-def populate_context_from_result(context: AgentContext, path: Path) -> RunResult:
+def raise_run_failure(status: str, error: dict[str, Any] | None) -> NoReturn:
+    """Translate execution failure, not verifier reward, into Harbor's error path."""
+
+    message = f"NeMo Fabric run failed (status: {status})"
+    if error is not None:
+        message += f": {error['message']}"
+        if status != "cancelled" and error["code"] in {
+            "host_timeout",
+            "timeout",
+            "codex_timed_out",
+        }:
+            # Harbor's trial boundary translates TimeoutError to AgentTimeoutError.
+            raise TimeoutError(message)
+    if status == "cancelled":
+        raise asyncio.CancelledError(message)
+    raise RuntimeError(message)
+
+
+def populate_context_from_result(context: AgentContext, path: Path) -> RunResult | None:
     """Validate a downloaded result and copy its summary into Harbor metadata."""
 
-    result = RunResult.from_mapping(json.loads(path.read_text(encoding="utf-8")))
-    mapping = result.to_mapping()
+    document = json.loads(path.read_text(encoding="utf-8"))
     if context.metadata is None:
         context.metadata = {}
+    if "runner_error" in document:
+        context.metadata["fabric"] = {
+            "status": "failed",
+            "error": document["runner_error"],
+            "provenance": document.get("provenance"),
+        }
+        return None
+    result = RunResult.from_mapping(document)
+    mapping = result.to_mapping()
     context.metadata["fabric"] = {
         "status": mapping["status"],
         "runtime_id": mapping["runtime_id"],
@@ -757,7 +843,14 @@ def populate_context_from_result(context: AgentContext, path: Path) -> RunResult
         "artifacts": mapping["artifacts"],
         "telemetry": mapping["telemetry"],
         "error": mapping.get("error"),
+        "provenance": mapping["metadata"].get("harbor_provenance"),
     }
+    usage = result.usage
+    if usage is not None:
+        context.n_input_tokens = usage.get("input_tokens")
+        context.n_output_tokens = usage.get("output_tokens")
+        context.n_cache_tokens = usage.metadata.get("cached_input_tokens")
+        context.cost_usd = usage.get("cost_usd")
     return result
 
 
@@ -777,10 +870,15 @@ def populate_context_from_trajectory(context: AgentContext, path: Path) -> None:
     metrics = trajectory.final_metrics
     if metrics is None:
         return
-    context.n_input_tokens = metrics.total_prompt_tokens
-    context.n_cache_tokens = metrics.total_cached_tokens
-    context.n_output_tokens = metrics.total_completion_tokens
-    context.cost_usd = metrics.total_cost_usd
+    # Normalized invocation usage is authoritative. ATIF only fills gaps.
+    for name, value in {
+        "n_input_tokens": metrics.total_prompt_tokens,
+        "n_cache_tokens": metrics.total_cached_tokens,
+        "n_output_tokens": metrics.total_completion_tokens,
+        "cost_usd": metrics.total_cost_usd,
+    }.items():
+        if getattr(context, name) is None:
+            setattr(context, name, value)
 
 
 def _record_host_atif_validation(

@@ -5,7 +5,7 @@
 // to a PiSessionHandle and normalized results while keeping SDK construction
 // behind a factory for focused lifecycle testing.
 
-import type { AgentRunRequest, AgentRunResult, JsonObject, RuntimeContext } from "nemo-fabric-adapter-contract";
+import type { AgentRunRequest, AgentRunResult, AgentUsage, JsonObject, RuntimeContext } from "nemo-fabric-adapter-contract";
 import { LifecycleError, type AdapterRuntime, type AdapterStartInput } from "nemo-fabric-adapters-common";
 
 import { collectRelayArtifacts, type RelayArtifact } from "./relay-config.js";
@@ -21,11 +21,13 @@ export interface PiPromptOutcome {
   stopReason?: PiStopReason;
   errorMessage?: string;
   shutdownRequested?: boolean;
+  usage?: AgentUsage;
 }
 
 export interface PiSessionHandle {
   readonly relay?: PiRelayRuntime;
   readonly turnCount?: number;
+  readonly provenance?: JsonObject;
   prompt(text: string): Promise<PiPromptOutcome>;
   stop(): Promise<void>;
 }
@@ -113,6 +115,18 @@ export class PiAdapterRuntime implements AdapterRuntime {
 
     const relay = this.session.relay;
     const outcome = await this.session.prompt(request.input);
+    const finish = (result: AgentRunResult) => withRelayOutput(
+      {
+        ...result,
+        ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
+        ...(this.session?.provenance === undefined ? {} : {
+          extensions: { ...result.extensions, provenance: this.session.provenance },
+        }),
+      },
+      relay,
+      outcome.turnStarted,
+      outcome.turnCount,
+    );
     if (
       !Number.isInteger(outcome.turnCount) ||
       outcome.turnCount < this.turnCount ||
@@ -122,18 +136,13 @@ export class PiAdapterRuntime implements AdapterRuntime {
     }
     this.turnCount = outcome.turnCount;
     if (!outcome.accepted) {
-      return withRelayOutput(
-        failed("pi_prompt_rejected", "Pi rejected the prompt before starting an agent run"),
-        relay,
-        outcome.turnStarted,
-        outcome.turnCount,
-      );
+      return finish(failed("pi_prompt_rejected", "Pi rejected the prompt before starting an agent run"));
     }
     if (outcome.shutdownRequested || outcome.stopReason === "aborted") {
       if (outcome.shutdownRequested) {
         this.unusable = true;
       }
-      return withRelayOutput(
+      return finish(
         {
           status: "cancelled",
           output: null,
@@ -145,33 +154,15 @@ export class PiAdapterRuntime implements AdapterRuntime {
             retryable: false,
           },
         },
-        relay,
-        outcome.turnStarted,
-        outcome.turnCount,
       );
     }
     if (outcome.stopReason === "error") {
-      return withRelayOutput(
-        failed("pi_model_error", outcome.errorMessage || "The Pi model invocation failed"),
-        relay,
-        outcome.turnStarted,
-        outcome.turnCount,
-      );
+      return finish(failed("pi_model_error", outcome.errorMessage || "The Pi model invocation failed"));
     }
     if (outcome.text === undefined || outcome.text.length === 0) {
-      return withRelayOutput(
-        failed("pi_no_assistant_response", "Pi completed without a final assistant text response"),
-        relay,
-        outcome.turnStarted,
-        outcome.turnCount,
-      );
+      return finish(failed("pi_no_assistant_response", "Pi completed without a final assistant text response"));
     }
-    return withRelayOutput(
-      { status: "succeeded", output: { response: outcome.text } },
-      relay,
-      outcome.turnStarted,
-      outcome.turnCount,
-    );
+    return finish({ status: "succeeded", output: { response: outcome.text } });
   }
 
   async stop(): Promise<void> {

@@ -136,6 +136,7 @@ def test_harbor_transport_models_validate_mcp_targets():
         "config_base_dir",
         "logs_dir",
         "request",
+        "environment_env_names",
     }
     assert payload_properties["logs_dir"]["default"] == "/logs/agent"
     with pytest.raises(ValidationError, match="require url"):
@@ -175,7 +176,20 @@ def test_each_harbor_job_delegates_to_an_independent_fabric_run(
             self.runtime_id = runtime_id
 
         def to_mapping(self) -> dict[str, str]:
-            return {"runtime_id": self.runtime_id}
+            return {
+                "agent_name": "test",
+                "harness": "test",
+                "adapter_kind": "process",
+                "runtime_id": self.runtime_id,
+                "invocation_id": "invoke",
+                "request_id": "request",
+                "status": "succeeded",
+                "output": None,
+                "artifacts": {"artifacts": []},
+                "metadata": {},
+                "telemetry": [],
+                "events": [],
+            }
 
     class FakeFabric:
         async def run(self, config, *, base_dir, request):
@@ -733,10 +747,10 @@ def test_harbor_023_options_schema_and_preflight():
         "fabric_venv_path",
         "fabric_workspace",
     }
-    assert FabricAgent.capabilities.atif is True
+    assert FabricAgent.capabilities.atif is False
     for field in ("skills", "mcp_servers"):
         if field in type(FabricAgent.capabilities).model_fields:
-            assert getattr(FabricAgent.capabilities, field) is True
+            assert getattr(FabricAgent.capabilities, field) is False
 
     agent = AgentConfig(
         import_path="nemo_fabric.integrations.harbor:FabricAgent",
@@ -765,7 +779,7 @@ def test_harbor_023_factory_loads_fabric_agent(tmp_path: Path):
     )
 
     assert agent.name() == "fabric"
-    assert agent.SUPPORTS_ATIF is True
+    assert agent.SUPPORTS_ATIF is False
     assert agent.fabric_max_turns == 12
 
 

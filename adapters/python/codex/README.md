@@ -156,6 +156,13 @@ gateway and passes its explicit `base_url` to Relay as the upstream endpoint.
 
 ## Testing
 
+Normalized usage reports invocation-local token counts. The adapter subtracts
+the previous SDK thread totals across repeated invocations; input counts already
+include cached tokens, which are also available as
+`usage.metadata.cached_input_tokens` in the Fabric result. Unknown cost remains
+unavailable. Adapter result metadata records the actual initialized app-server
+version separately from the SDK and adapter package versions.
+
 Run the unit and opt-in real SDK tests separately:
 
 ```bash
