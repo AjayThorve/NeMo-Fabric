@@ -89,10 +89,6 @@ Use normalized `FabricConfig` fields for portable configuration:
 - `instructions.system` supports `replace` and maps to Codex base instructions.
   Codex rejects `append` during planning and direct adapter startup.
 - `runtime.timeout_seconds` sets the NeMo Fabric invocation deadline.
-
-Invocation deadlines return the normalized error code `timeout` (previously
-`codex_timed_out`). The adapter interrupts the active turn and closes the SDK
-before returning that outcome.
 - `environment.workspace` sets the working directory, and `environment.env`
   supplies explicit harness-visible variables.
 - `mcp` maps stdio, HTTP, and streamable HTTP servers into the Codex thread's
@@ -102,6 +98,8 @@ before returning that outcome.
   registers each directory as a process-scoped Codex skill root so Codex can
   select matching skills through its normal discovery behavior.
 - `telemetry` enables native OpenTelemetry or NeMo Relay observability.
+
+Invocation deadlines return the normalized error code `timeout` (previously `codex_timed_out`). The adapter interrupts the active turn and closes the SDK before returning that outcome.
 
 The Codex adapter does not declare `tools.blocked` support. The current Codex
 runtime has per-MCP-server tool filters, but it does not provide one complete

@@ -201,10 +201,15 @@ async def test_one_shot_deadline_preserves_stage_and_cleanup(
         mock_native.stop_runtime.assert_not_called()
 
 
+@pytest.mark.parametrize("structured", [False, True])
 async def test_one_shot_stop_deadline_has_canonical_result_error(
-    native_client, mock_native
+    native_client, mock_native, structured
 ):
-    mock_native.stop_runtime.side_effect = TimeoutError("deadline")
+    mock_native.stop_runtime.side_effect = (
+        FabricRuntimeError("deadline", stage="stop", code="timeout")
+        if structured
+        else TimeoutError("deadline")
+    )
     result = await native_client.run(_config(), input="test")
     assert result.status == "failed"
     assert result.error.stage == "stop"

@@ -6,7 +6,9 @@
 import asyncio
 import json
 import sys
-from unittest.mock import AsyncMock
+from contextlib import AsyncExitStack, nullcontext
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -256,6 +258,53 @@ async def test_bridge_retains_runner_failure_record(bridge, code, exception):
         await agent.run("test", environment, context)
     agent.populate_context_post_run(context)
     assert context.metadata["fabric"]["runner_error"] == document["runner_error"]
+
+
+@pytest.mark.parametrize("runner_failure", [False, True])
+async def test_inner_deadline_enters_harbor_agent_timeout_path(bridge, runner_failure):
+    from harbor.models.trial.result import TrialResult
+    from harbor.trial.errors import AgentTimeoutError
+    from harbor.trial.trial import Trial
+
+    agent, environment, document = bridge
+    error = {
+        "stage": "invoke",
+        "code": "timeout",
+        "message": "inner invocation deadline",
+        "retryable": False,
+    }
+    if runner_failure:
+        document.clear()
+        document["runner_error"] = error
+    else:
+        document.update(status="failed", error=error)
+    environment.exec.return_value.return_code = 1
+
+    mock_trial = MagicMock(spec=Trial)
+    mock_trial.agent = agent
+    mock_trial.agent_environment = environment
+    mock_trial.user_agent = None
+    mock_trial._now.return_value = datetime.now(timezone.utc)
+    mock_trial._phase_network_policy = MagicMock(return_value=AsyncExitStack())
+    mock_trial._log_context.return_value = nullcontext()
+    target = MagicMock(spec=TrialResult)
+
+    with pytest.raises(AgentTimeoutError) as caught:
+        await Trial._run_agent_phase(
+            mock_trial,
+            target=target,
+            instruction="test",
+            timeout_sec=60,
+            user=None,
+        )
+
+    assert type(caught.value.__cause__) is TimeoutError
+    assert "inner invocation deadline" in str(caught.value.__cause__)
+    assert target.agent_execution.finished_at is not None
+    agent.populate_context_post_run(target.agent_result)
+    failure = target.agent_result.metadata["fabric"]
+    diagnostic = failure["runner_error"] if runner_failure else failure["error"]
+    assert diagnostic["code"] == "timeout"
 
 
 @pytest.mark.parametrize("stage", ["start", "invoke", "stop"])

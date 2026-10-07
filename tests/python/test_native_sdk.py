@@ -20,9 +20,9 @@ from nemo_fabric import Fabric
 from nemo_fabric import FabricConfig
 from nemo_fabric import FabricConfigError
 from nemo_fabric import FabricRuntimeError
+from nemo_fabric import FabricStateError
 from nemo_fabric import RunRequest
 from nemo_fabric import RuntimeStatus
-from nemo_fabric import FabricStateError
 
 
 async def test_native_sdk(hermes_shim_agent_dir: Path):
