@@ -68,8 +68,7 @@ async def test_bridge_rejects_unsuccessful_result_and_preserves_evidence(
     environment.exec.return_value.return_code = return_code
     context = AgentContext()
 
-    exception = asyncio.CancelledError if status == "cancelled" else RuntimeError
-    with pytest.raises(exception, match=status):
+    with pytest.raises(RuntimeError, match=status):
         await agent.run("test", environment, context)
 
     assert agent._result_path.is_file()
@@ -90,8 +89,121 @@ async def test_cancellation_takes_precedence_over_error_classification(bridge):
         "message": "cancelled",
         "retryable": False,
     }
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(RuntimeError, match="status: cancelled") as caught:
         await agent.run("test", environment, AgentContext())
+    assert type(caught.value) is RuntimeError
+
+
+@pytest.mark.parametrize("external_cancellation", [False, True])
+async def test_invocation_cancellation_is_not_harbor_job_cancellation(
+    bridge, tmp_path, monkeypatch, external_cancellation
+):
+    from functools import partial
+    from logging import Logger
+    from uuid import uuid4
+
+    import harbor.job as job_module
+    from harbor.job import Job
+    from harbor.models.agent.context import AgentContext
+    from harbor.models.job.config import JobConfig, RetryConfig
+    from harbor.models.task.id import LocalTaskId
+    from harbor.models.trial.config import TrialConfig
+    from harbor.models.trial.paths import TrialPaths
+    from harbor.models.trial.result import AgentInfo, TrialResult
+    from harbor.trial.queue import TrialQueue
+    from harbor.trial.trial import Trial
+
+    agent, environment, document = bridge
+    document["status"] = "cancelled"
+    environment.exec.return_value.return_code = 1
+    if external_cancellation:
+        environment.exec.side_effect = asyncio.CancelledError("job interrupted")
+
+    trials = []
+    for name in ("cancelled-invocation", "healthy"):
+        config = TrialConfig(task={"path": tmp_path}, trial_name=name)
+        result = TrialResult(
+            task_name="test",
+            trial_name=name,
+            trial_uri=(tmp_path / name).as_uri(),
+            task_id=LocalTaskId(path=tmp_path),
+            task_checksum="test",
+            config=config,
+            agent_info=AgentInfo(name="fabric", version="test"),
+            agent_result=AgentContext(),
+        )
+        mock_trial = MagicMock(spec=Trial)
+        mock_trial.logger = MagicMock(spec=Logger)
+        mock_trial.config = config
+        mock_trial.result = result
+        mock_trial.paths = MagicMock(spec=TrialPaths)
+        mock_trial.paths.exception_message_path = tmp_path / f"{name}-exception.txt"
+        mock_trial.agent = agent
+        mock_trial.agent_environment = environment
+        mock_trial.user_agent = None
+        mock_trial._now.side_effect = lambda: datetime.now(timezone.utc)
+        mock_trial._phase_network_policy.return_value = AsyncExitStack()
+        mock_trial._log_context.return_value = nullcontext()
+        mock_trial._record_exception.side_effect = partial(
+            Trial._record_exception, mock_trial
+        )
+        mock_trial.run.side_effect = partial(Trial.run, mock_trial)
+        trials.append(mock_trial)
+
+    cancelled, healthy = trials
+    cancelled._run.side_effect = partial(
+        Trial._run_agent_phase,
+        cancelled,
+        target=cancelled.result,
+        instruction="test",
+        timeout_sec=60,
+        user=None,
+    )
+    cancelled._recover_outputs.side_effect = lambda: agent.populate_context_post_run(
+        cancelled.result.agent_result
+    )
+    monkeypatch.setattr(Trial, "create", AsyncMock(side_effect=trials))
+    monkeypatch.setattr(job_module, "record_command_job_id", MagicMock())
+    monkeypatch.setattr(job_module, "capture_job_finished_async", MagicMock())
+
+    mock_job = MagicMock(spec=Job)
+    mock_job.config = JobConfig(quiet=True)
+    mock_job._id = uuid4()
+    mock_job._existing_job_result = None
+    mock_job._existing_trial_results = []
+    mock_job._existing_trial_configs = []
+    mock_job._trial_configs = [trial.config for trial in trials]
+    mock_job._remaining_trial_configs = mock_job._trial_configs
+    mock_job._n_retries = 0
+    mock_job._metrics = {"adhoc": []}
+    mock_job._job_config_path = tmp_path / "config.json"
+    mock_job._trial_queue = TrialQueue(
+        n_concurrent=1, retry_config=RetryConfig(max_retries=0)
+    )
+    mock_job._run_trials_with_queue.side_effect = partial(
+        Job._run_trials_with_queue, mock_job
+    )
+    summary_path = tmp_path / "job-result.json"
+    mock_job._write_job_result.side_effect = lambda **_: summary_path.write_text(
+        mock_job._job_result.model_dump_json(exclude={"trial_results"})
+    )
+
+    if external_cancellation:
+        with pytest.raises(asyncio.CancelledError):
+            await Job.run(mock_job)
+        assert json.loads(summary_path.read_text())["finished_at"] is None
+        return
+
+    result = await Job.run(mock_job)
+    assert result.finished_at is not None
+    assert result.stats.n_completed_trials == 2
+    assert result.stats.n_errored_trials == 1
+    assert result.stats.n_cancelled_trials == 0
+    assert cancelled.result.exception_info.exception_type == "RuntimeError"
+    assert cancelled.result.agent_result.metadata["fabric"]["status"] == "cancelled"
+    assert healthy.result.exception_info is None
+    healthy.run.assert_awaited_once()
+    assert json.loads(summary_path.read_text())["stats"]["n_completed_trials"] == 2
 
 
 async def test_bridge_does_not_mask_process_failure_when_result_is_missing(bridge):

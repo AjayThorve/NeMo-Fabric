@@ -46,6 +46,9 @@ Lifecycle failures before a normalized result is available produce a separate
 `timeout`. The bridge classifies only this canonical code as a deadline, whether
 it appears in a runner error or normalized result, and raises `TimeoutError`,
 which Harbor translates into `AgentTimeoutError`. Cancellation takes precedence.
+An invocation with status `cancelled` becomes a trial execution error and retains
+its normalized status; it does not interrupt the Harbor job. Actual orchestration
+cancellation still propagates as `asyncio.CancelledError`.
 The bridge does not
 inspect harness IDs, native error-code lists, or diagnostic text. Other
 adapter-specific timeout codes are not automatically reclassified.

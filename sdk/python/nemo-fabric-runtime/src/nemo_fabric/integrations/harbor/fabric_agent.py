@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.metadata
 import json
 import shlex
@@ -819,7 +818,9 @@ def raise_run_failure(status: str, error: dict[str, Any] | None) -> NoReturn:
     if error is not None:
         message += f": {error['message']}"
     if status == "cancelled":
-        raise asyncio.CancelledError(message)
+        # An invocation outcome must not cancel Harbor's job orchestration.
+        # Actual task cancellation still propagates from the awaited operations.
+        raise RuntimeError(message)
     if error is not None and error.get("code") == "timeout":
         raise TimeoutError(message)
     raise RuntimeError(message)
