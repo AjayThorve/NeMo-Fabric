@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from pathlib import PurePosixPath
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -44,12 +45,15 @@ def mock_fabric_fixture(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(name="skill_payload")
 def skill_payload_fixture(tmp_path: Path, skill_collection: Path):
-    return FabricAgent(
+    payload = FabricAgent(
         logs_dir=tmp_path / "logs",
         fabric_adapter_id="acme.skills",
-        fabric_workspace=str(tmp_path),
         skills_dir=str(skill_collection),
     )._build_spec("Use the uploaded skills.")
+    # Harbor's host-side task paths are POSIX, even on a Windows host. Simulate
+    # task-side filesystem access using this host's native temporary directory.
+    payload.config_base_dir = PurePosixPath(tmp_path.as_posix())
+    return payload
 
 
 @pytest.mark.parametrize(
@@ -65,9 +69,9 @@ async def test_harbor_collection_is_accepted_by_individual_path_adapters(
     payload = FabricAgent(
         logs_dir=tmp_path / "logs",
         fabric_adapter_id=adapter_id,
-        fabric_workspace=str(tmp_path),
         skills_dir=str(skill_collection),
     )._build_spec("Use both skills.")
+    payload.config_base_dir = PurePosixPath(tmp_path.as_posix())
 
     async def validate(config, *, base_dir, request):
         adapter_config = AgentConfig.from_mapping(
