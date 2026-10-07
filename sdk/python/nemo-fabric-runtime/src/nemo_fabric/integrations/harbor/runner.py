@@ -26,6 +26,23 @@ async def run(payload: FabricRunPayload) -> RunResult:
         if name not in os.environ:
             raise ValueError(f"Harbor runner environment variable {name} is not set")
         config.environment.env[name] = os.environ[name]
+    if payload.skills_dir is not None:
+        root = Path(payload.skills_dir)
+        if not root.is_absolute():
+            root = Path(payload.config_base_dir) / root
+        if not root.is_dir():
+            raise ValueError(
+                f"Harbor skills collection must be an existing task-side directory: {root}"
+            )
+        skills = sorted(root.iterdir())
+        for skill in skills:
+            if not skill.is_dir() or not (skill / "SKILL.md").is_file():
+                raise ValueError(
+                    "Harbor skills collection entries must be directories "
+                    f"containing SKILL.md: {skill}"
+                )
+        for skill in skills:
+            config.add_skill_path(skill)
     result = await Fabric().run(
         config,
         base_dir=payload.config_base_dir,

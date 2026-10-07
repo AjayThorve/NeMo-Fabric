@@ -512,6 +512,7 @@ else:
             return FabricRunPayload(
                 config=config,
                 config_base_dir=self._environment_config_base_dir,
+                skills_dir=self.skills_dir,
                 request=self._build_request(instruction),
                 environment_env_names=tuple(self.fabric_environment_env),
             )
@@ -531,7 +532,6 @@ else:
                 enabled_tools=self.fabric_enabled_tools,
                 telemetry=self.fabric_telemetry,
                 model_name=self.model_name,
-                skills_dir=self.skills_dir,
                 mcp_servers=tuple(
                     HarborMcpServer.model_validate(server.model_dump(mode="python"))
                     for server in self.mcp_servers

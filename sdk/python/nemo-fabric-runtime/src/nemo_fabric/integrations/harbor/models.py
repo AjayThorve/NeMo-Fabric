@@ -49,6 +49,7 @@ class FabricRunPayload(BaseModel):
     config: FabricConfig
     config_base_dir: PurePosixPath
     logs_dir: PurePosixPath = PurePosixPath("/logs/agent")
+    skills_dir: PurePosixPath | None = None
     request: RunRequest
     environment_env_names: tuple[str, ...] = ()
 
