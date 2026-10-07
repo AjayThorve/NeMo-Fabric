@@ -136,6 +136,7 @@ def test_harbor_transport_models_validate_mcp_targets():
         "config_base_dir",
         "logs_dir",
         "request",
+        "environment_env_names",
     }
     assert payload_properties["logs_dir"]["default"] == "/logs/agent"
     with pytest.raises(ValidationError, match="require url"):

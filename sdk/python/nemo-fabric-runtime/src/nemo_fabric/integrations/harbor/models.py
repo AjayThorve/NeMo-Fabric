@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
+import re
 from typing import Literal
 from typing import Self
 
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
+from pydantic import field_validator
 from pydantic import model_validator
 
 from nemo_fabric import FabricConfig
@@ -48,3 +50,13 @@ class FabricRunPayload(BaseModel):
     config_base_dir: PurePosixPath
     logs_dir: PurePosixPath = PurePosixPath("/logs/agent")
     request: RunRequest
+    environment_env_names: tuple[str, ...] = ()
+
+    @field_validator("environment_env_names")
+    @classmethod
+    def validate_env_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None for name in value):
+            raise ValueError(
+                "environment_env_names must contain environment variable names"
+            )
+        return value

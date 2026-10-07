@@ -16,6 +16,7 @@ from typing import Any
 from typing import Literal
 from typing import cast
 
+from pydantic import ConfigDict
 from pydantic import Field
 from pydantic import field_validator
 from pydantic import model_validator
@@ -93,6 +94,8 @@ else:
 
     class FabricAgentOptions(AgentOptions):
         """Harbor-facing options for the task-local Fabric runner."""
+
+        model_config = ConfigDict(hide_input_in_errors=True)
 
         fabric_adapter_id: str = Field(description="Installed Fabric adapter ID.")
         fabric_config_base_dir: str | None = Field(
@@ -186,6 +189,14 @@ else:
                 raise ValueError(
                     "fabric_model_api_key_env must be a non-empty environment variable name without surrounding whitespace"
                 )
+            return value
+
+        @field_validator("fabric_environment_env")
+        @classmethod
+        def validate_environment_env(
+            cls, value: dict[str, str] | None
+        ) -> dict[str, str] | None:
+            FabricRunPayload.validate_env_names(tuple(value or {}))
             return value
 
         @field_validator("fabric_discovery_paths")
@@ -325,6 +336,13 @@ else:
             self.fabric_max_turns = options.fabric_max_turns
             self.fabric_runtime_timeout_seconds = options.fabric_runtime_timeout_seconds
             self.fabric_environment_env = dict(options.fabric_environment_env or {})
+            for name, value in self.fabric_environment_env.items():
+                if name in self._extra_env and self._extra_env[name] != value:
+                    raise ValueError(
+                        f"{name} has conflicting values in extra_env and fabric_environment_env"
+                    )
+                # Harbor scrubs sensitive values collected from extra_env.
+                self._extra_env[name] = value
             self.fabric_blocked_tools = list(options.fabric_blocked_tools or [])
             self.fabric_enabled_tools = (
                 list(options.fabric_enabled_tools)
@@ -438,10 +456,15 @@ else:
             return RunRequest(input=instruction, context=context)
 
         def _build_spec(self, instruction: str) -> FabricRunPayload:
+            config = self._build_config()
+            # Transport names; values arrive through Harbor's managed exec env.
+            for name in self.fabric_environment_env:
+                config.environment.env.pop(name, None)
             return FabricRunPayload(
-                config=self._build_config(),
+                config=config,
                 config_base_dir=self._environment_config_base_dir,
                 request=self._build_request(instruction),
+                environment_env_names=tuple(self.fabric_environment_env),
             )
 
         def _build_config(self) -> FabricConfig:
