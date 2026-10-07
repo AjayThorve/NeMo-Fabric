@@ -64,3 +64,12 @@ manifest or workspace lockfile.
 The OpenCode adapter runs with Bun 1.4.2 or later. Source and package checks
 run its process lifecycle under Bun while using Node.js for TypeScript builds
 and the shared workspace tooling.
+
+The workspace overrides OpenCode's exact MCP client and core pins to `2.2.0`
+for [GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h).
+The real OpenCode process tests exercise HTTP MCP initialization, tool discovery,
+model calls, and cleanup against these versions. Remove this scoped override
+after the supported OpenCode release pins patched MCP packages itself. This
+development-workspace override does not change a consumer's dependency graph;
+consumers using OpenCode OAuth must also upgrade their MCP packages and follow
+the advisory's credential-migration guidance.
