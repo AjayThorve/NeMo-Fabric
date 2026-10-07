@@ -198,7 +198,19 @@ stable base version. The tag workflows normalize the prerelease tag and stamp
 ecosystem-specific package metadata in their disposable checkouts. Do not
 commit RC-specific versions or internal dependency pins to the release branch.
 
-The adapter catalog is a separate, metadata-only wheel. `just set-version` regenerates its resource bundle after stamping both ecosystems. `just wheels` checks freshness and builds it with the other distributions. Run `just adapter-catalog` after descriptor edits; do not edit the generated bundle by hand. Catalog resources do not register execution runners.
+The adapter catalog is a separate, metadata-only wheel. `just set-version`
+regenerates its resource bundle after stamping both ecosystems. `just wheels`
+checks freshness and builds it with the other distributions. Run
+`just adapter-catalog` after descriptor edits; do not edit the generated bundle
+by hand. Catalog resources do not register execution runners.
+
+The catalog follows the existing nightly and release publication cadence:
+GitHub Actions builds it in `python-wheels-*`, GitLab collects its
+platform-independent wheel, and KitMaker publishes it to PyPI using the
+`nemo-fabric-adapter-catalog` project. That project must exist in KitMaker before
+the first publication. No separate package tag or manual upload is required.
+PR CI tests sdist-to-wheel builds, isolated installation without harness SDKs,
+and release dispatch with external writes mocked.
 
 The helper updates:
 
