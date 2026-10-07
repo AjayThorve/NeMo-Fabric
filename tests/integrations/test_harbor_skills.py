@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nemo_fabric import Fabric, RunResult
+from nemo_fabric import Fabric, FabricConfigError, RunResult
 from nemo_fabric.integrations.harbor import runner
 from nemo_fabric.integrations.harbor.fabric_agent import FabricAgent
 from nemo_fabric.integrations.harbor.models import FabricRunPayload
@@ -166,6 +166,50 @@ async def test_relative_collection_is_resolved_against_task_base_dir(
     ]
 
 
+async def test_relative_explicit_skill_overlapping_collection_is_not_added_twice(
+    skill_payload, skill_collection: Path, mock_fabric
+):
+    relative_skill = Path(skill_collection.name) / "default"
+    skill_payload.config.add_skill_path(relative_skill)
+    skill_payload.skills_dir = Path(skill_collection.name)
+    original = skill_payload.config.to_mapping()
+    await runner.run(skill_payload)
+    config = mock_fabric.run.call_args.args[0]
+    assert config.skills.paths == [
+        str(relative_skill),
+        str(skill_collection / "alternate"),
+    ]
+    assert skill_payload.config.to_mapping() == original
+
+
+def test_cli_preserves_malformed_skill_path_diagnostic(
+    tmp_path: Path, skill_payload, skill_collection: Path
+):
+    offending_path = skill_collection / "default"
+    (offending_path / "SKILL.md").unlink()
+    spec = tmp_path / "spec.json"
+    result = tmp_path / "result.json"
+    spec.write_text(skill_payload.model_dump_json(), encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nemo_fabric.integrations.harbor.runner",
+            "--spec",
+            str(spec),
+            "--result",
+            str(result),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode == 1
+    diagnostic = json.loads(result.read_text())["runner_error"]
+    assert str(offending_path) in diagnostic["message"]
+    assert diagnostic["code"] == "harbor_skills_invalid"
+
+
 @pytest.mark.parametrize(
     "malformation", ["missing", "file", "missing-skill", "skill-is-dir", "loose-file"]
 )
@@ -191,7 +235,7 @@ async def test_malformed_collection_fails_before_harness_execution(
             "not a child skill", encoding="utf-8"
         )
         offending_path = skill_collection / "SKILL.md"
-    with pytest.raises(ValueError, match="Harbor skills collection") as error:
+    with pytest.raises(FabricConfigError, match="Harbor skills collection") as error:
         await runner.run(skill_payload)
     assert str(offending_path) in str(error.value)
     mock_fabric.run.assert_not_awaited()
@@ -209,8 +253,9 @@ async def test_no_collection_leaves_explicit_fabric_skills_unchanged(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="mock Claude CLI requires a POSIX executable"
 )
+@pytest.mark.parametrize("relative_overlap", [False, True])
 def test_task_runner_cli_stages_collection_through_real_claude_sdk(
-    tmp_path: Path, skill_collection: Path, repo_root: Path
+    tmp_path: Path, skill_collection: Path, repo_root: Path, relative_overlap: bool
 ):
     logs = tmp_path / "logs"
     artifacts = tmp_path / "artifacts"
@@ -231,6 +276,10 @@ def test_task_runner_cli_stages_collection_through_real_claude_sdk(
         },
     )
     payload = agent._build_spec("Use both skills.")
+    if relative_overlap:
+        payload.config_base_dir = PurePosixPath(tmp_path.as_posix())
+        payload.skills_dir = Path(skill_collection.name)
+        payload.config.add_skill_path(Path(skill_collection.name) / "default")
     payload.config.runtime.artifacts = artifacts
     payload.config.environment.artifacts = artifacts
     payload.logs_dir = logs

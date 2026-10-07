@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 from nemo_fabric import Fabric
+from nemo_fabric import FabricConfigError
 from nemo_fabric import FabricError
 from nemo_fabric import RunResult
 from nemo_fabric.integrations.harbor.models import FabricRunPayload
@@ -27,22 +28,35 @@ async def run(payload: FabricRunPayload) -> RunResult:
             raise ValueError(f"Harbor runner environment variable {name} is not set")
         config.environment.env[name] = os.environ[name]
     if payload.skills_dir is not None:
+        base_dir = Path(payload.config_base_dir).resolve()
         root = Path(payload.skills_dir)
         if not root.is_absolute():
-            root = Path(payload.config_base_dir) / root
+            root = base_dir / root
         if not root.is_dir():
-            raise ValueError(
-                f"Harbor skills collection must be an existing task-side directory: {root}"
+            raise FabricConfigError(
+                f"Harbor skills collection must be an existing task-side directory: {root}",
+                stage="configuration",
+                code="harbor_skills_invalid",
             )
         skills = sorted(root.iterdir())
         for skill in skills:
             if not skill.is_dir() or not (skill / "SKILL.md").is_file():
-                raise ValueError(
+                raise FabricConfigError(
                     "Harbor skills collection entries must be directories "
-                    f"containing SKILL.md: {skill}"
+                    f"containing SKILL.md: {skill}",
+                    stage="configuration",
+                    code="harbor_skills_invalid",
                 )
+        existing_paths = (
+            {(base_dir / path).resolve() for path in config.skills.paths}
+            if config.skills is not None
+            else set()
+        )
         for skill in skills:
-            config.add_skill_path(skill)
+            resolved = skill.resolve()
+            if resolved not in existing_paths:
+                config.add_skill_path(skill)
+                existing_paths.add(resolved)
     result = await Fabric().run(
         config,
         base_dir=payload.config_base_dir,
