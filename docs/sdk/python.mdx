@@ -967,8 +967,11 @@ All public SDK errors inherit from `FabricError`.
 | `FabricNativeUnavailableError` | Native extension is not installed or importable. |
 
 Consumers own job-level retries and rollout-level failure policy.
-Native lifecycle deadlines carry `FabricRuntimeError.code == "timeout"` and the
-failed lifecycle stage. Target deadlines reported as normalized results use
+Raised native lifecycle deadlines carry `FabricRuntimeError.code == "timeout"`
+and the failed lifecycle stage. If invocation succeeds in `Fabric.run()` but stop
+times out, it returns a failed `RunResult` with `error.stage == "stop"` and
+`error.code == "timeout"`. Check the returned result as well as raised errors.
+Target deadlines reported as normalized results also use
 `result.error.code == "timeout"`. Diagnostic text is not a timeout classifier.
 Single-invocation runs attempt to stop the runtime before returning. A `Runtime`
 used with `async with` also attempts cleanup after an invocation error; if cleanup

@@ -70,9 +70,12 @@ Refer to the [errors reference](https://github.com/NVIDIA/NeMo-Fabric/blob/main/
 
 ## Cleanup And Resilience
 
-Native lifecycle deadlines raise `FabricRuntimeError` with `code="timeout"`
-and the failed lifecycle stage. A target deadline returned as a normalized result
-uses `result.error.code == "timeout"`. Do not classify deadlines from error text.
+Raised native lifecycle deadlines use `FabricRuntimeError` with `code="timeout"`
+and the failed lifecycle stage. If invocation succeeds in `Fabric.run()` but stop
+times out, it returns a failed `RunResult` with `error.stage == "stop"` and
+`error.code == "timeout"`. Check the returned result as well as raised errors.
+A target deadline returned as a normalized result also uses
+`result.error.code == "timeout"`. Do not classify deadlines from error text.
 
 - Prefer `run(...)` and `async with` runtimes: both attempt cleanup
   automatically. Shutdown is attempted, not guaranteed — `stop()`, including the
