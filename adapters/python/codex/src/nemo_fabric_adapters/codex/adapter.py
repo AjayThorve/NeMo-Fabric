@@ -995,7 +995,7 @@ def adapter_failure(error: CodexAdapterError) -> dict[str, Any]:
 
 def sdk_failure(error: BaseException) -> dict[str, Any]:
     if isinstance(error, TimeoutError):
-        return _failure("codex_timed_out", "Codex invocation timed out")
+        return _failure("timeout", "Codex invocation timed out")
     if isinstance(error, TransportClosedError):
         return _failure(
             "codex_connection_failed", "Codex SDK runtime connection closed"

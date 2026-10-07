@@ -1750,7 +1750,7 @@ def test_timeout_interrupts_native_turn_and_closes_sdk(
     output = invoke_once(codex_payload)
 
     client = mock_codex.instances[0]
-    assert output["error"]["code"] == "codex_timed_out"
+    assert output["error"]["code"] == "timeout"
     assert client.thread.handle.interrupted is True
     assert client.closed is True
 

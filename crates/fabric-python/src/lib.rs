@@ -15,7 +15,7 @@ use nemo_fabric_core::{
     resolve_diagnostic_plan_from_config_with_adapter_directories,
     resolve_run_plan_from_config_with_adapter_directories, run_plan,
 };
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyTimeoutError};
 use pyo3::prelude::*;
 
 pyo3::create_exception!(
@@ -258,6 +258,12 @@ where
 }
 
 fn to_py_error(error: nemo_fabric_core::FabricError) -> PyErr {
+    if matches!(
+        &error,
+        FabricError::AdapterLifecycleOperation { code, .. } if code == "host_timeout"
+    ) {
+        return PyTimeoutError::new_err(error.to_string());
+    }
     PyRuntimeError::new_err(error.to_string())
 }
 
