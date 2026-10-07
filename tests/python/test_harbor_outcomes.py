@@ -228,11 +228,17 @@ async def test_bridge_does_not_accept_success_result_from_failed_process(bridge)
     assert agent._result_path.is_file()
 
 
-async def test_bridge_does_not_mask_process_failure_with_invalid_result(bridge):
+@pytest.mark.parametrize("invalid_result", [{}, {"telemetry": 1}])
+async def test_bridge_does_not_mask_process_failure_with_invalid_result(
+    bridge, invalid_result
+):
     from harbor.models.agent.context import AgentContext
 
     agent, environment, document = bridge
-    document.clear()
+    if invalid_result:
+        document.update(invalid_result)
+    else:
+        document.clear()
     environment.exec.return_value.return_code = 2
     environment.exec.return_value.stderr = "runner failed before completing result"
     context = AgentContext()

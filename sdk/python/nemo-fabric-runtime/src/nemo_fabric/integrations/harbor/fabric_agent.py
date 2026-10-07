@@ -478,7 +478,7 @@ else:
                 else:
                     diagnostic = None
                 normalized = None if diagnostic else RunResult.from_mapping(document)
-            except (ValueError, FabricConfigError):
+            except (ValueError, TypeError, FabricConfigError):
                 ensure_success("NeMo Fabric run failed", result)
                 raise
             self._result_path = host_result_path
