@@ -210,10 +210,11 @@ def test_task_runner_cli_stages_collection_through_real_claude_sdk(
 ):
     logs = tmp_path / "logs"
     artifacts = tmp_path / "artifacts"
-    payload = FabricAgent(
+    agent = FabricAgent(
         logs_dir=logs,
         fabric_adapter_id="nvidia.fabric.claude",
         model_name="anthropic/claude-test-model",
+        fabric_python=sys.executable,
         fabric_workspace=str(tmp_path),
         skills_dir=str(skill_collection),
         fabric_harness_settings={"permission_mode": "dontAsk", "setting_sources": []},
@@ -224,14 +225,14 @@ def test_task_runner_cli_stages_collection_through_real_claude_sdk(
             "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK": "1",
             "MOCK_CLAUDE_CLI_LOG": str(tmp_path / "cli-args.jsonl"),
         },
-    )._build_spec("Use both skills.")
+    )
+    payload = agent._build_spec("Use both skills.")
     payload.config.runtime.artifacts = artifacts
     payload.config.environment.artifacts = artifacts
     payload.logs_dir = logs
     spec_path = tmp_path / "spec.json"
     result_path = tmp_path / "result.json"
     spec_path.write_text(payload.model_dump_json(), encoding="utf-8")
-    os.environ["ADAPTER_PYTHON"] = sys.executable
     completed = subprocess.run(
         [
             sys.executable,
@@ -246,6 +247,7 @@ def test_task_runner_cli_stages_collection_through_real_claude_sdk(
         capture_output=True,
         text=True,
         timeout=60,
+        env={**os.environ, **agent._runner_env},
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     result = RunResult.from_mapping(json.loads(result_path.read_text(encoding="utf-8")))
