@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.metadata
 import json
 import shlex
@@ -14,6 +15,7 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 from typing import Literal
+from typing import NoReturn
 from typing import cast
 
 from pydantic import ConfigDict
@@ -24,6 +26,7 @@ from pydantic import model_validator
 from nemo_fabric import EnvironmentConfig
 from nemo_fabric import DiscoveryConfig
 from nemo_fabric import FabricConfig
+from nemo_fabric import FabricConfigError
 from nemo_fabric import HarnessConfig
 from nemo_fabric import InstructionConfig
 from nemo_fabric import InstructionsConfig
@@ -462,10 +465,28 @@ else:
                 env=self._runner_env,
                 timeout_sec=self.fabric_timeout_sec,
             )
-            ensure_success("NeMo Fabric run failed", result)
-
-            await environment.download_file(remote_result_path, host_result_path)
+            try:
+                await environment.download_file(remote_result_path, host_result_path)
+            except Exception:
+                # Abrupt termination can leave no result: retain the process error.
+                ensure_success("NeMo Fabric run failed", result)
+                raise
             self._result_path = host_result_path
+            try:
+                normalized = RunResult.from_mapping(
+                    json.loads(host_result_path.read_text(encoding="utf-8"))
+                )
+            except (ValueError, FabricConfigError):
+                ensure_success("NeMo Fabric run failed", result)
+                raise
+            if normalized.status != "succeeded" or normalized.error is not None:
+                raise_run_failure(
+                    normalized.status,
+                    normalized.error.to_mapping()
+                    if normalized.error is not None
+                    else None,
+                )
+            ensure_success("NeMo Fabric run failed", result)
 
         def _build_request(self, instruction: str) -> RunRequest:
             context = {"source": "harbor"}
@@ -783,6 +804,16 @@ def ensure_success(message: str, result: Any) -> None:
     stdout = getattr(result, "stdout", "")
     stderr = getattr(result, "stderr", "")
     raise RuntimeError(f"{message} (exit {result.return_code}): {stderr or stdout}")
+
+
+def raise_run_failure(status: str, error: dict[str, Any] | None) -> NoReturn:
+    """Translate execution status, never verifier reward, into Harbor's error path."""
+    message = f"NeMo Fabric run failed (status: {status})"
+    if error is not None:
+        message += f": {error['message']}"
+    if status == "cancelled":
+        raise asyncio.CancelledError(message)
+    raise RuntimeError(message)
 
 
 def populate_context_from_result(context: AgentContext, path: Path) -> RunResult:

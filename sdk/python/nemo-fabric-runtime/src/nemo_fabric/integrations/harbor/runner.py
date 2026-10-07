@@ -49,6 +49,8 @@ def main() -> None:
     result = asyncio.run(run(payload))
     args.result.parent.mkdir(parents=True, exist_ok=True)
     args.result.write_text(json.dumps(result.to_mapping(), indent=2), encoding="utf-8")
+    if result.status != "succeeded" or result.error is not None:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

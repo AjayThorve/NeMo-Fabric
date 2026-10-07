@@ -36,3 +36,7 @@ Harbor's `is_sensitive_env_key` policy for all credentials, including credential
 other than the configured model key; the bridge cannot infer secrets from values.
 
 Deploy matching bridge and runner versions: a runner predating name-only transport cannot read the new payload. Do not put credentials in harness settings or native configuration files.
+
+## Execution Outcomes
+
+The task runner writes normalized evidence before exiting nonzero for failed or cancelled runs. The bridge downloads that evidence before reporting a Harbor execution failure or cancellation, including when the runner exits nonzero. A completed answer can still receive verifier reward zero; verifier scoring is not an execution failure. A missing or malformed result does not hide an available process failure.
