@@ -27,6 +27,10 @@ target = get_target_descriptor("nvidia.nooa.arc-solver")
 
 Each call returns a fresh dictionary containing the canonical descriptor object. Unknown IDs raise `KeyError`; lookup does not guess an adapter or fall back to another version. Catalog-format errors and unreadable or malformed resources propagate as errors.
 
+## Supported API
+
+Consumers should use `get_adapter_descriptor()` and `get_target_descriptor()`. Returned descriptors follow the [Fabric adapter descriptor contract](../../../docs/adapter-contract/README.md). The package's resource files, including `catalog.json`, their layout, and their metadata fields are internal implementation details and can change between releases. Do not read these resources directly; the lookup functions keep consumers independent of the bundle's storage format.
+
 ## Metadata Is Not Execution
 
 The bundle is a package resource, not an installed descriptor under `share/nemo-fabric`. Installing it does not register executable adapters or change NeMo Fabric runner selection, including when it is co-installed with adapter packages. Task execution continues to discover and validate task-owned descriptors, runners, and harness dependencies through the existing runtime APIs.
