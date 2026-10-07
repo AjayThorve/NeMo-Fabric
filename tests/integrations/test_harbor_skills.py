@@ -172,6 +172,7 @@ async def test_relative_collection_is_resolved_against_task_base_dir(
 async def test_malformed_collection_fails_before_harness_execution(
     skill_payload, skill_collection: Path, mock_fabric, malformation: str
 ):
+    offending_path = skill_collection
     if malformation == "missing":
         shutil.rmtree(skill_collection)
     elif malformation == "file":
@@ -179,17 +180,20 @@ async def test_malformed_collection_fails_before_harness_execution(
         skill_collection.write_text("not a collection", encoding="utf-8")
     elif malformation == "missing-skill":
         (skill_collection / "default" / "SKILL.md").unlink()
+        offending_path = skill_collection / "default"
     elif malformation == "skill-is-dir":
         path = skill_collection / "default" / "SKILL.md"
         path.unlink()
         path.mkdir()
+        offending_path = skill_collection / "default"
     else:
         (skill_collection / "SKILL.md").write_text(
             "not a child skill", encoding="utf-8"
         )
+        offending_path = skill_collection / "SKILL.md"
     with pytest.raises(ValueError, match="Harbor skills collection") as error:
         await runner.run(skill_payload)
-    assert str(skill_collection) in str(error.value)
+    assert str(offending_path) in str(error.value)
     mock_fabric.run.assert_not_awaited()
 
 
