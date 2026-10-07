@@ -63,6 +63,15 @@ def test_bundle_preserves_descriptors_and_separates_source_metadata(
             assert record["package"] == {"name": "example-adapter", "version": "1.2.3"}
 
 
+def test_check_accepts_windows_checkout_line_endings(
+    catalog_repo: Path, adapter_source: Path
+):
+    generate_catalog(catalog_repo)
+    output = catalog_repo / BUNDLE
+    output.write_bytes(output.read_bytes().replace(b"\n", b"\r\n"))
+    generate_catalog(catalog_repo, check=True)
+
+
 def test_typescript_records_are_discovered_without_sdk_or_python_manifest(
     catalog_repo: Path, adapter_source: Path
 ):

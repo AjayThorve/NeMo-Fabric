@@ -85,15 +85,16 @@ def generate_catalog(root: Path, *, check: bool = False) -> None:
     expected = (
         json.dumps(catalog_data(root), indent=2, sort_keys=True, ensure_ascii=False)
         + "\n"
-    ).encode("utf-8")
+    )
     output = root / BUNDLE
-    actual = output.read_bytes() if output.exists() else None
+    # Git can check out JSON with CRLF on Windows; line endings are not metadata.
+    actual = output.read_text(encoding="utf-8") if output.exists() else None
     if check:
         if actual != expected:
             raise ValueError("Adapter catalog is stale; run just adapter-catalog")
     elif actual != expected:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(expected)
+        output.write_text(expected, encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":
