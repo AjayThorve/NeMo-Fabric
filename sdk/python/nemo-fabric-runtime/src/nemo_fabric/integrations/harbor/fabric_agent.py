@@ -471,7 +471,6 @@ else:
                 # Abrupt termination can leave no result: retain the process error.
                 ensure_success("NeMo Fabric run failed", result)
                 raise
-            self._result_path = host_result_path
             try:
                 normalized = RunResult.from_mapping(
                     json.loads(host_result_path.read_text(encoding="utf-8"))
@@ -479,6 +478,7 @@ else:
             except (ValueError, FabricConfigError):
                 ensure_success("NeMo Fabric run failed", result)
                 raise
+            self._result_path = host_result_path
             if normalized.status != "succeeded" or normalized.error is not None:
                 raise_run_failure(
                     normalized.status,
