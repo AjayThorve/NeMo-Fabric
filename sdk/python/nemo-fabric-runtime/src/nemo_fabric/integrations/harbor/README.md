@@ -13,3 +13,7 @@ typed `FabricConfig` for the task run.
 Refer to the [Harbor example](../../../../../../../examples/harbor/README.md)
 for runnable SWE-Bench commands, configuration variations, reward checks, and
 Relay artifacts.
+
+## Execution Outcomes
+
+The task runner writes normalized evidence before exiting nonzero for failed or cancelled runs. The bridge downloads that evidence before reporting a Harbor execution failure or cancellation, including when the runner exits nonzero. A completed answer can still receive verifier reward zero; verifier scoring is not an execution failure. A missing or malformed result does not hide an available process failure.

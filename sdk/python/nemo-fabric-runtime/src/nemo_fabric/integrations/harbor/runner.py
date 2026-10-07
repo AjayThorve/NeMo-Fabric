@@ -38,10 +38,14 @@ def main() -> None:
     parser.add_argument("--result", type=Path, required=True)
     args = parser.parse_args()
 
-    payload = FabricRunPayload.model_validate_json(args.spec.read_text(encoding="utf-8"))
+    payload = FabricRunPayload.model_validate_json(
+        args.spec.read_text(encoding="utf-8")
+    )
     result = asyncio.run(run(payload))
     args.result.parent.mkdir(parents=True, exist_ok=True)
     args.result.write_text(json.dumps(result.to_mapping(), indent=2), encoding="utf-8")
+    if result.status != "succeeded" or result.error is not None:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
