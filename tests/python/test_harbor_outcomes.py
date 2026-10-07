@@ -121,8 +121,13 @@ async def test_bridge_does_not_mask_process_failure_with_invalid_result(bridge):
     document.clear()
     environment.exec.return_value.return_code = 2
     environment.exec.return_value.stderr = "runner failed before completing result"
+    context = AgentContext()
     with pytest.raises(RuntimeError, match="runner failed before completing result"):
-        await agent.run("test", environment, AgentContext())
+        await agent.run("test", environment, context)
+    assert agent._result_path is None
+    assert list(agent.logs_dir.glob("fabric-result-*.json"))
+    agent.populate_context_post_run(context)
+    assert context.is_empty()
 
 
 @pytest.fixture(name="runner_cli")
@@ -176,6 +181,28 @@ async def test_bridge_rejects_error_even_with_succeeded_status(bridge):
     }
     with pytest.raises(RuntimeError, match="stop failed"):
         await agent.run("test", environment, AgentContext())
+
+
+def test_runner_rejects_error_even_with_succeeded_status(
+    runner_cli, monkeypatch, run_result
+):
+    from nemo_fabric import RunResult
+    from nemo_fabric.integrations.harbor import runner
+
+    document = run_result.to_mapping()
+    document["error"] = {
+        "stage": "stop",
+        "code": "runtime_stop_failed",
+        "message": "stop failed",
+        "retryable": False,
+    }
+    monkeypatch.setattr(
+        runner, "run", AsyncMock(return_value=RunResult.from_mapping(document))
+    )
+    with pytest.raises(SystemExit) as caught:
+        runner.main()
+    assert caught.value.code == 1
+    assert json.loads(runner_cli.read_text())["error"]["code"] == "runtime_stop_failed"
 
 
 async def test_completed_wrong_answer_is_not_an_execution_failure(bridge):
