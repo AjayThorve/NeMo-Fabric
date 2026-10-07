@@ -26,6 +26,7 @@ from nemo_fabric import EnvironmentConfig
 from nemo_fabric import DiscoveryConfig
 from nemo_fabric import FabricConfig
 from nemo_fabric import FabricConfigError
+from nemo_fabric import inspect_adapter
 from nemo_fabric import HarnessConfig
 from nemo_fabric import InstructionConfig
 from nemo_fabric import InstructionsConfig
@@ -119,6 +120,10 @@ else:
         fabric_discovery_paths: list[str] | None = Field(
             default=None,
             description="Task-local adapter descriptor paths for Fabric discovery.",
+        )
+        fabric_adapter_descriptor: Path | None = Field(
+            default=None,
+            description="Host-readable canonical descriptor for an external adapter; task discovery remains separate.",
         )
         fabric_workspace: str = Field(
             default=HARBOR_DEFAULT_WORKSPACE,
@@ -275,16 +280,7 @@ else:
 
         # Current Harbor main gates task skills and MCP servers on these fields;
         # the published 0.23.0 capabilities model does not define them yet.
-        capabilities = AgentCapabilities.model_validate(
-            {
-                "atif": True,
-                **{
-                    field: True
-                    for field in ("skills", "mcp_servers")
-                    if field in AgentCapabilities.model_fields
-                },
-            }
-        )
+        capabilities = AgentCapabilities()
         options_model = FabricAgentOptions
         options: FabricAgentOptions
 
@@ -315,6 +311,7 @@ else:
             *args: Any,
             fabric_model_api_key_env: str | None = None,
             fabric_discovery_paths: list[str] | None = None,
+            fabric_adapter_descriptor: Path | None = None,
             **kwargs: Any,
         ) -> None:
             super().__init__(
@@ -326,6 +323,7 @@ else:
                 fabric_config_bundle=fabric_config_bundle,
                 fabric_config_target=fabric_config_target,
                 fabric_discovery_paths=fabric_discovery_paths,
+                fabric_adapter_descriptor=fabric_adapter_descriptor,
                 fabric_workspace=fabric_workspace,
                 fabric_harness_settings=fabric_harness_settings,
                 fabric_model_base_url=fabric_model_base_url,
@@ -351,6 +349,7 @@ else:
             self.fabric_config_bundle = options.fabric_config_bundle
             self.fabric_config_target = options.fabric_config_target
             self.fabric_discovery_paths = list(options.fabric_discovery_paths or [])
+            self.fabric_adapter_descriptor = options.fabric_adapter_descriptor
             self.fabric_workspace = options.fabric_workspace
             self.fabric_harness_settings = dict(options.fabric_harness_settings or {})
             self.fabric_model_base_url = options.fabric_model_base_url
@@ -391,6 +390,38 @@ else:
                 self._resolve_environment_config_base_dir()
             )
             self._result_path: Path | None = None
+            if self.fabric_adapter_descriptor is not None:
+                self._host_descriptor = json.loads(
+                    self.fabric_adapter_descriptor.read_text(encoding="utf-8")
+                )
+            else:
+                try:
+                    from nemo_fabric_adapter_catalog import get_adapter_descriptor
+                except ModuleNotFoundError as error:
+                    if error.name != "nemo_fabric_adapter_catalog":
+                        raise
+                    self._host_descriptor = None
+                else:
+                    try:
+                        self._host_descriptor = get_adapter_descriptor(
+                            self.fabric_adapter_id
+                        )
+                    except KeyError:
+                        self._host_descriptor = None
+            self._capability_profile = inspect_adapter(
+                self._build_config(), self._host_descriptor
+            )
+            self.capabilities = AgentCapabilities.model_validate(
+                {
+                    field: supported
+                    for field, supported in {
+                        "atif": self._capability_profile.atif,
+                        "skills": self._capability_profile.skills,
+                        "mcp_servers": self._capability_profile.mcp,
+                    }.items()
+                    if field in AgentCapabilities.model_fields
+                }
+            )
 
         @staticmethod
         def name() -> str:
@@ -506,6 +537,7 @@ else:
 
         def _build_spec(self, instruction: str) -> FabricRunPayload:
             config = self._build_config()
+            profile = inspect_adapter(config, self._host_descriptor)
             # Transport names; values arrive through Harbor's managed exec env.
             for name in self.fabric_environment_env:
                 config.environment.env.pop(name, None)
@@ -515,6 +547,7 @@ else:
                 skills_dir=self.skills_dir,
                 request=self._build_request(instruction),
                 environment_env_names=tuple(self.fabric_environment_env),
+                adapter_descriptor_sha256=profile.descriptor_sha256,
             )
 
         def _build_config(self) -> FabricConfig:
@@ -630,17 +663,7 @@ def build_harbor_config(
 
     name = f"harbor-{adapter_id.rsplit('.', maxsplit=1)[-1]}"
     artifact_root = f"{HARBOR_ARTIFACT_ROOT}/{name}"
-    settings = harbor_harness_defaults(adapter_id)
-    settings.update(harness_settings or {})
-    if adapter_id == "nvidia.fabric.claude":
-        if max_turns is None:
-            max_turns = 75
-        if timeout_seconds is None:
-            timeout_seconds = 1800
-        environment_env = {
-            "IS_SANDBOX": "1",
-            **(environment_env or {}),
-        }
+    settings = dict(harness_settings or {})
     config = FabricConfig(
         metadata=MetadataConfig(
             name=name,
@@ -742,21 +765,6 @@ def model_provider(model_name: str) -> str:
     """Derive the Fabric provider from Harbor's model identifier."""
 
     return model_name.split("/", maxsplit=1)[0] if "/" in model_name else "openai"
-
-
-def harbor_harness_defaults(adapter_id: str) -> dict[str, Any]:
-    """Return the minimal unattended settings required in a Harbor task."""
-
-    if adapter_id == "nvidia.fabric.claude":
-        return {
-            "permission_mode": "bypassPermissions",
-        }
-    if adapter_id == "nvidia.fabric.codex":
-        return {
-            "sandbox": "workspace-write",
-            "approval_mode": "deny_all",
-        }
-    return {}
 
 
 def fabric_runner_command(

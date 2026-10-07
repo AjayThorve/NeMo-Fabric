@@ -136,6 +136,7 @@ def test_harbor_transport_models_validate_mcp_targets():
         "skills_dir",
         "request",
         "environment_env_names",
+        "adapter_descriptor_sha256",
     }
     assert payload_properties["logs_dir"]["default"] == "/logs/agent"
     with pytest.raises(ValidationError, match="require url"):
@@ -277,6 +278,7 @@ def test_claude_calculator_run_uses_current_adapter_contract():
         adapter_id="nvidia.fabric.claude",
         workspace="/app",
         model_name="anthropic/claude-sonnet-4-5",
+        harness_settings={"permission_mode": "bypassPermissions"},
         max_turns=20,
         timeout_seconds=600,
     )
@@ -353,7 +355,13 @@ def test_harbor_calculator_documents_explicit_cli_commands():
     assert "fabric_config_factory" not in calculator
     assert "fabric_config_factory" not in landing
     assert "fabric_config_factory" not in swebench
-    assert "fabric_harness_settings" not in calculator
+    assert (
+        'fabric_harness_settings={"permission_mode":"bypassPermissions"}' in calculator
+    )
+    assert (
+        'fabric_harness_settings={"sandbox":"workspace-write","approval_mode":"deny_all"}'
+        in calculator
+    )
     assert "fabric_workspace=/app" in calculator
     assert "--model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning" in calculator
     assert "--model anthropic/claude-sonnet-4-5" in calculator
@@ -572,6 +580,8 @@ def test_swebench_matrix_translates_harbor_inputs_to_typed_config(tmp_path: Path
     claude = build_harbor_config(
         adapter_id="nvidia.fabric.claude",
         workspace="/testbed",
+        harness_settings={"permission_mode": "bypassPermissions"},
+        environment_env={"IS_SANDBOX": "1"},
     )
 
     assert base.environment is not None
@@ -708,6 +718,7 @@ def test_harbor_023_options_schema_and_preflight():
     schema = FabricAgent.options_schema()
     assert schema["required"] == ["fabric_adapter_id"]
     assert set(schema["properties"]) == {
+        "fabric_adapter_descriptor",
         "fabric_adapter_id",
         "fabric_blocked_tools",
         "fabric_config_base_dir",
@@ -731,10 +742,10 @@ def test_harbor_023_options_schema_and_preflight():
         "fabric_venv_path",
         "fabric_workspace",
     }
-    assert FabricAgent.capabilities.atif is True
+    assert FabricAgent.capabilities.atif is False
     for field in ("skills", "mcp_servers"):
         if field in type(FabricAgent.capabilities).model_fields:
-            assert getattr(FabricAgent.capabilities, field) is True
+            assert getattr(FabricAgent.capabilities, field) is False
 
     agent = AgentConfig(
         import_path="nemo_fabric.integrations.harbor:FabricAgent",
@@ -763,7 +774,7 @@ def test_harbor_023_factory_loads_fabric_agent(tmp_path: Path):
     )
 
     assert agent.name() == "fabric"
-    assert agent.SUPPORTS_ATIF is True
+    assert agent.SUPPORTS_ATIF is False
     assert agent.fabric_max_turns == 12
 
 

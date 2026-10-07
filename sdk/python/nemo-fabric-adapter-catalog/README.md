@@ -37,6 +37,11 @@ The bundle is a package resource, not an installed descriptor under `share/nemo-
 
 A snapshot claim is not proof of the task environment's capabilities. Pin compatible releases and compare the snapshot with the actual task descriptor before relying on it. A provider declaring ATIF support does not establish that it is enabled or that an artifact was produced. Capability normalization, host/task compatibility enforcement, and runtime-observed provenance are separate concerns, not implemented by this package.
 
+The runtime's public [host inspection API](../../../docs/sdk/python.mdx#inspect-metadata-on-a-separate-host)
+can validate supplied metadata and derive standalone admission claims. Pass its
+descriptor fingerprint to task-side execution to reject mismatched metadata.
+The catalog itself remains dependency-free and does not perform runtime inspection.
+
 ## Maintain The Bundle
 
 `scripts/ci/generate_adapter_catalog.py` collects canonical descriptors from leaf packages under `adapters/python/` and `adapters/typescript/`. It also includes targets under each leaf's `targets/` directory. Common support packages, presets, fixtures, and source-only external integrations are excluded. There is no adapter-ID allowlist.
