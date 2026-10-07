@@ -42,7 +42,10 @@ Deploy matching bridge and runner versions: a runner predating name-only transpo
 The task runner writes normalized evidence before exiting nonzero for failed or cancelled runs. The bridge downloads that evidence before reporting a Harbor execution failure or cancellation, including when the runner exits nonzero. A completed answer can still receive verifier reward zero; verifier scoring is not an execution failure. A missing or malformed result does not hide an available process failure.
 
 Lifecycle failures before a normalized result is available produce a separate
-`runner_error` record. NeMo Fabric normalizes deadline errors to code `timeout`;
-the bridge raises `TimeoutError`, which Harbor translates into
-`AgentTimeoutError`. Cancellation takes precedence. The bridge does not
-inspect harness IDs, native error-code lists, or diagnostic text.
+`runner_error` record. Core host-operation deadlines (`host_timeout`) use code
+`timeout`. The bridge classifies only this canonical code as a deadline, whether
+it appears in a runner error or normalized result, and raises `TimeoutError`,
+which Harbor translates into `AgentTimeoutError`. Cancellation takes precedence.
+The bridge does not
+inspect harness IDs, native error-code lists, or diagnostic text. Other
+adapter-specific timeout codes are not automatically reclassified.
