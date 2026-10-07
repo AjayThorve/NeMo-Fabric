@@ -29,7 +29,7 @@ Each call returns a fresh dictionary containing the canonical descriptor object.
 
 ## Metadata Is Not Execution
 
-The bundle is a package resource, not an installed descriptor under `share/nemo-fabric`. Installing it does not register executable adapters or change Fabric runner selection, including when it is co-installed with adapter packages. Task execution continues to discover and validate task-owned descriptors, runners, and harness dependencies through the existing runtime APIs.
+The bundle is a package resource, not an installed descriptor under `share/nemo-fabric`. Installing it does not register executable adapters or change NeMo Fabric runner selection, including when it is co-installed with adapter packages. Task execution continues to discover and validate task-owned descriptors, runners, and harness dependencies through the existing runtime APIs.
 
 A snapshot claim is not proof of the task environment's capabilities. Pin compatible releases and compare the snapshot with the actual task descriptor before relying on it. A provider declaring ATIF support does not establish that it is enabled or that an artifact was produced. Capability normalization, host/task compatibility enforcement, and runtime-observed provenance are separate concerns, not implemented by this package.
 
