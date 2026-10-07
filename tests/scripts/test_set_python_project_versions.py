@@ -23,6 +23,14 @@ def test_set_python_project_versions_updates_internal_pins_with_extras(
     (tmp_path / "sdk" / "python" / "nemo-fabric-collector").mkdir(parents=True)
     (tmp_path / "sdk" / "python" / "nemo-fabric").mkdir(parents=True)
     (tmp_path / "sdk" / "python" / "nemo-fabric-runtime").mkdir()
+    catalog_path = (
+        tmp_path / "sdk" / "python" / "nemo-fabric-adapter-catalog" / "pyproject.toml"
+    )
+    catalog_path.parent.mkdir()
+    catalog_path.write_text(
+        '[project]\nname = "nemo-fabric-adapter-catalog"\nversion = "0.2.0"\n',
+        encoding="utf-8",
+    )
     coordinator_path = tmp_path / "pyproject.toml"
     coordinator_path.write_text(
         """\
@@ -148,6 +156,7 @@ streaming = [
         '[project]\nname = "typescript-build-helper"\n'
     )
     assert contract_project["version"] == "0.2.0rc5"
+    assert tomllib.loads(catalog_path.read_text())["project"]["version"] == "0.2.0rc5"
     runtime_project = tomllib.loads(runtime_path.read_text(encoding="utf-8"))["project"]
     assert runtime_project["dynamic"] == ["version"]
     assert runtime_project["optional-dependencies"]["streaming"] == [

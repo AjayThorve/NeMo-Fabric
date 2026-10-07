@@ -36,6 +36,7 @@ consumed outside the source tree.
 - `justfile` build, test, clean, and documentation recipes
 - Release tags, registry publication, and release-facing documentation in
   `RELEASING.md`
+- Metadata-only adapter catalog under `sdk/python/nemo-fabric-adapter-catalog`: regenerate its single resource bundle with `just adapter-catalog` and check freshness with `just check-adapter-catalog`. Keep source metadata outside descriptor objects and catalog resources outside automatic execution discovery. `just set-version` refreshes the bundle after stamping both ecosystems; `just wheels` checks freshness and builds the package.
 
 ## Dependency Selection
 

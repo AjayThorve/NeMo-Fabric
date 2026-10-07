@@ -2374,6 +2374,11 @@ requires-dist = [
 provides-extras = ["claude", "codex", "streaming", "deepagents", "mini-swe-agent", "openhands", "nooa", "remote-agent", "openclaw", "harbor", "hermes-agent", "relay"]
 
 [[package]]
+name = "nemo-fabric-adapter-catalog"
+version = "0.5.0"
+source = { editable = "sdk/python/nemo-fabric-adapter-catalog" }
+
+[[package]]
 name = "nemo-fabric-adapter-contract"
 version = "0.5.0"
 source = { editable = "adapter-contract/python" }
@@ -2742,6 +2747,7 @@ test = [
     { name = "fastapi" },
     { name = "mcp" },
     { name = "mcp-server-time" },
+    { name = "nemo-fabric-adapter-catalog" },
     { name = "pkginfo" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -2826,6 +2832,7 @@ test = [
     { name = "fastapi", specifier = "~=0.138" },
     { name = "mcp", specifier = ">=1.28.1,<2.0" },
     { name = "mcp-server-time", specifier = "~=2026.7" },
+    { name = "nemo-fabric-adapter-catalog", editable = "sdk/python/nemo-fabric-adapter-catalog" },
     { name = "pkginfo", specifier = "~=1.12" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.26" },
