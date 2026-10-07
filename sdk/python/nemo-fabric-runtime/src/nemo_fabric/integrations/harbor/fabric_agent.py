@@ -66,6 +66,9 @@ try:
     from harbor.agents.options import AgentOptions
     from harbor.environments.base import BaseEnvironment
     from harbor.models.agent.context import AgentContext
+    from harbor.utils.env import get_required_host_vars
+    from harbor.utils.env import is_sensitive_env_key
+    from harbor.utils.env import resolve_env_vars
 except (
     ModuleNotFoundError
 ) as error:  # pragma: no cover - exercised without harbor extra
@@ -127,7 +130,7 @@ else:
         )
         fabric_model_api_key_env: str | None = Field(
             default=None,
-            description="Name of a task-environment model credential variable.",
+            description="Name of a task-environment model credential variable recognized by Harbor's redaction policy.",
         )
         fabric_system_instruction: str | None = Field(
             default=None,
@@ -140,7 +143,8 @@ else:
             default=None, gt=0, description="Fabric runtime timeout in seconds."
         )
         fabric_environment_env: dict[str, str] | None = Field(
-            default=None, description="Task-local Fabric environment variables."
+            default=None,
+            description="Task-local Fabric environment variables; credentials require host-variable references without inline defaults.",
         )
         fabric_blocked_tools: list[str] | None = Field(
             default=None, description="Tools to block in the selected adapter."
@@ -189,6 +193,12 @@ else:
                 raise ValueError(
                     "fabric_model_api_key_env must be a non-empty environment variable name without surrounding whitespace"
                 )
+            if value is not None:
+                FabricRunPayload.validate_env_names((value,))
+                if not is_sensitive_env_key(value):
+                    raise ValueError(
+                        f"fabric_model_api_key_env '{value}' is not recognized by Harbor's redaction policy; use a credential name such as MODEL_API_KEY"
+                    )
             return value
 
         @field_validator("fabric_environment_env")
@@ -197,6 +207,16 @@ else:
             cls, value: dict[str, str] | None
         ) -> dict[str, str] | None:
             FabricRunPayload.validate_env_names(tuple(value or {}))
+            for name, entry in (value or {}).items():
+                if not is_sensitive_env_key(name):
+                    continue
+                references = get_required_host_vars({name: entry})
+                if not references or any(
+                    default is not None for _, default in references
+                ):
+                    raise ValueError(
+                        f"{name} requires a host-variable reference without an inline default in fabric_environment_env; use Harbor extra_env for literal credentials"
+                    )
             return value
 
         @field_validator("fabric_discovery_paths")
@@ -335,7 +355,9 @@ else:
             self.fabric_system_instruction = options.fabric_system_instruction
             self.fabric_max_turns = options.fabric_max_turns
             self.fabric_runtime_timeout_seconds = options.fabric_runtime_timeout_seconds
-            self.fabric_environment_env = dict(options.fabric_environment_env or {})
+            self.fabric_environment_env = resolve_env_vars(
+                options.fabric_environment_env or {}
+            )
             for name, value in self.fabric_environment_env.items():
                 if name in self._extra_env and self._extra_env[name] != value:
                     raise ValueError(

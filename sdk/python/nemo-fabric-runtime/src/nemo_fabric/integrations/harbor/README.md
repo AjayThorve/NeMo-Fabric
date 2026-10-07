@@ -16,6 +16,23 @@ Relay artifacts.
 
 ## Credential Transport
 
-Use `fabric_model_api_key_env` to name the model credential variable. Supply its value through Harbor's `extra_env` or `fabric_environment_env`. The bridge merges the latter into Harbor's managed environment and redaction inputs, rejects conflicting values, and transports only variable names in the retained run specification. The task runner resolves those names from its execution environment; a missing variable fails with a name-only diagnostic. Non-sensitive environment settings follow the same transport.
+Use `fabric_model_api_key_env` to name the model credential variable. The name
+must match Harbor's redaction policy, for example `MODEL_API_KEY`. Names such as
+`MODEL_DSN` are rejected during options validation, including Harbor preflight.
+Supply literal credentials through Harbor's managed `extra_env` (`--ae`).
+In `fabric_environment_env`, sensitive entries must use host-variable references
+such as `{"MODEL_API_KEY": "${MODEL_API_KEY}"}` without inline defaults.
+The bridge resolves these references with Harbor's utilities and merges them into
+Harbor's managed environment and redaction
+inputs, rejects conflicting values, and transports only variable names in the
+retained run specification. The task runner resolves those names from its
+execution environment; a missing variable fails with a name-only diagnostic.
+This keeps raw credentials out of Harbor's top-level job configuration, which
+is outside its trial-directory scrubber.
+
+Non-sensitive settings such as `RUN_MODE` can use arbitrary valid environment
+variable names. Harbor does not scrub their values. Use names recognized by
+Harbor's `is_sensitive_env_key` policy for all credentials, including credentials
+other than the configured model key; the bridge cannot infer secrets from values.
 
 Deploy matching bridge and runner versions: a runner predating name-only transport cannot read the new payload. Do not put credentials in harness settings or native configuration files.
