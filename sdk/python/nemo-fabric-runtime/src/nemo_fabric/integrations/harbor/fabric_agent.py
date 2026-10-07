@@ -14,6 +14,7 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 from typing import Literal
+from typing import NoReturn
 from typing import cast
 
 from pydantic import ConfigDict
@@ -24,6 +25,7 @@ from pydantic import model_validator
 from nemo_fabric import EnvironmentConfig
 from nemo_fabric import DiscoveryConfig
 from nemo_fabric import FabricConfig
+from nemo_fabric import FabricConfigError
 from nemo_fabric import HarnessConfig
 from nemo_fabric import InstructionConfig
 from nemo_fabric import InstructionsConfig
@@ -38,6 +40,7 @@ from nemo_fabric import RunResult
 from nemo_fabric import RuntimeConfig
 from nemo_fabric import ToolsConfig
 from nemo_fabric.integrations.harbor.models import FabricRunPayload
+from nemo_fabric.integrations.harbor.models import FabricRunnerFailure
 from nemo_fabric.integrations.harbor.models import HarborMcpServer
 
 INSTALL_ENV_NAMES = {
@@ -462,10 +465,34 @@ else:
                 env=self._runner_env,
                 timeout_sec=self.fabric_timeout_sec,
             )
-            ensure_success("NeMo Fabric run failed", result)
-
-            await environment.download_file(remote_result_path, host_result_path)
+            try:
+                await environment.download_file(remote_result_path, host_result_path)
+            except Exception:
+                # Abrupt termination can leave no result: retain the process error.
+                ensure_success("NeMo Fabric run failed", result)
+                raise
+            try:
+                document = json.loads(host_result_path.read_text(encoding="utf-8"))
+                if isinstance(document, dict) and "runner_error" in document:
+                    diagnostic = FabricRunnerFailure.model_validate(document)
+                else:
+                    diagnostic = None
+                normalized = None if diagnostic else RunResult.from_mapping(document)
+            except (ValueError, TypeError, FabricConfigError):
+                ensure_success("NeMo Fabric run failed", result)
+                raise
             self._result_path = host_result_path
+            if diagnostic is not None:
+                raise_run_failure("failed", diagnostic.runner_error.model_dump())
+            assert normalized is not None
+            if normalized.status != "succeeded" or normalized.error is not None:
+                raise_run_failure(
+                    normalized.status,
+                    normalized.error.to_mapping()
+                    if normalized.error is not None
+                    else None,
+                )
+            ensure_success("NeMo Fabric run failed", result)
 
         def _build_request(self, instruction: str) -> RunRequest:
             context = {"source": "harbor"}
@@ -785,10 +812,33 @@ def ensure_success(message: str, result: Any) -> None:
     raise RuntimeError(f"{message} (exit {result.return_code}): {stderr or stdout}")
 
 
-def populate_context_from_result(context: AgentContext, path: Path) -> RunResult:
+def raise_run_failure(status: str, error: dict[str, Any] | None) -> NoReturn:
+    """Translate execution status, never verifier reward, into Harbor's error path."""
+    message = f"NeMo Fabric run failed (status: {status})"
+    if error is not None:
+        message += f": {error['message']}"
+    if status == "cancelled":
+        # An invocation outcome must not cancel Harbor's job orchestration.
+        # Actual task cancellation still propagates from the awaited operations.
+        raise RuntimeError(message)
+    if error is not None and error.get("code") == "timeout":
+        raise TimeoutError(message)
+    raise RuntimeError(message)
+
+
+def populate_context_from_result(
+    context: AgentContext, path: Path
+) -> RunResult | FabricRunnerFailure:
     """Validate a downloaded result and copy its summary into Harbor metadata."""
 
-    result = RunResult.from_mapping(json.loads(path.read_text(encoding="utf-8")))
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(document, dict) and "runner_error" in document:
+        failure = FabricRunnerFailure.model_validate(document)
+        if context.metadata is None:
+            context.metadata = {}
+        context.metadata["fabric"] = failure.model_dump()
+        return failure
+    result = RunResult.from_mapping(document)
     mapping = result.to_mapping()
     if context.metadata is None:
         context.metadata = {}

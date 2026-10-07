@@ -70,6 +70,15 @@ Refer to the [errors reference](https://github.com/NVIDIA/NeMo-Fabric/blob/main/
 
 ## Cleanup And Resilience
 
+Core host-operation deadlines (`host_timeout`) become Python `TimeoutError`, then
+`FabricRuntimeError` with `code="timeout"` and the failed lifecycle stage.
+If invocation succeeds in `Fabric.run()` but stop reaches this deadline,
+it returns a failed `RunResult` with `error.stage == "stop"` and
+`error.code == "timeout"`. Check the returned result as well as raised errors.
+Adapters can report execution deadlines in normalized results with
+`result.error.code == "timeout"`. Other adapter-specific timeout codes are not
+automatically reclassified. Do not classify deadlines from error text.
+
 - Prefer `run(...)` and `async with` runtimes: both attempt cleanup
   automatically. Shutdown is attempted, not guaranteed — `stop()`, including the
   automatic call at `async with` exit, can raise `FabricRuntimeError`. On a

@@ -36,3 +36,19 @@ Harbor's `is_sensitive_env_key` policy for all credentials, including credential
 other than the configured model key; the bridge cannot infer secrets from values.
 
 Deploy matching bridge and runner versions: a runner predating name-only transport cannot read the new payload. Do not put credentials in harness settings or native configuration files.
+
+## Execution Outcomes
+
+The task runner writes normalized evidence before exiting nonzero for failed or cancelled runs. The bridge downloads that evidence before reporting a Harbor execution failure or cancellation, including when the runner exits nonzero. A completed answer can still receive verifier reward zero; verifier scoring is not an execution failure. A missing or malformed result does not hide an available process failure.
+
+Lifecycle failures before a normalized result is available produce a separate
+`runner_error` record. Core host-operation deadlines (`host_timeout`) use code
+`timeout`. The bridge classifies only this canonical code as a deadline, whether
+it appears in a runner error or normalized result, and raises `TimeoutError`,
+which Harbor translates into `AgentTimeoutError`. Cancellation takes precedence.
+An invocation with status `cancelled` becomes a trial execution error and retains
+its normalized status; it does not interrupt the Harbor job. Actual orchestration
+cancellation still propagates as `asyncio.CancelledError`.
+The bridge does not
+inspect harness IDs, native error-code lists, or diagnostic text. Other
+adapter-specific timeout codes are not automatically reclassified.
