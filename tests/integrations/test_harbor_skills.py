@@ -211,7 +211,15 @@ def test_cli_preserves_malformed_skill_path_diagnostic(
 
 
 @pytest.mark.parametrize(
-    "malformation", ["missing", "file", "missing-skill", "skill-is-dir", "loose-file"]
+    "malformation",
+    [
+        "missing",
+        "file",
+        "missing-skill",
+        "skill-is-dir",
+        "skill-is-symlink",
+        "loose-file",
+    ],
 )
 async def test_malformed_collection_fails_before_harness_execution(
     skill_payload, skill_collection: Path, mock_fabric, malformation: str
@@ -229,6 +237,12 @@ async def test_malformed_collection_fails_before_harness_execution(
         path = skill_collection / "default" / "SKILL.md"
         path.unlink()
         path.mkdir()
+        offending_path = skill_collection / "default"
+    elif malformation == "skill-is-symlink":
+        path = skill_collection / "default" / "SKILL.md"
+        path.unlink()
+        path.symlink_to(skill_collection / "alternate" / "SKILL.md")
+        assert path.is_file()
         offending_path = skill_collection / "default"
     else:
         (skill_collection / "SKILL.md").write_text(

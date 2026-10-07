@@ -40,10 +40,15 @@ async def run(payload: FabricRunPayload) -> RunResult:
             )
         skills = sorted(root.iterdir())
         for skill in skills:
-            if not skill.is_dir() or not (skill / "SKILL.md").is_file():
+            skill_file = skill / "SKILL.md"
+            if (
+                not skill.is_dir()
+                or skill_file.is_symlink()
+                or not skill_file.is_file()
+            ):
                 raise FabricConfigError(
                     "Harbor skills collection entries must be directories "
-                    f"containing SKILL.md: {skill}",
+                    f"containing a regular SKILL.md file: {skill}",
                     stage="configuration",
                     code="harbor_skills_invalid",
                 )

@@ -623,7 +623,6 @@ def build_harbor_config(
     enabled_tools: list[str] | None = None,
     telemetry: Literal["none", "relay"] = "none",
     model_name: str | None = None,
-    skills_dir: str | Path | None = None,
     mcp_servers: tuple[HarborMcpServer, ...] = (),
     discovery_paths: tuple[str | Path, ...] = (),
 ) -> FabricConfig:
@@ -713,8 +712,6 @@ def build_harbor_config(
                 url=cast(str, server.url),
                 exposure="harness_native",
             )
-    if skills_dir is not None:
-        config.add_skill_path(skills_dir)
     if telemetry == "relay":
         relay_output = f"{artifact_root}/relay"
         config.enable_relay(

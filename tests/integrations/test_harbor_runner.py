@@ -52,7 +52,7 @@ def load_codex_adapter():
     return adapter
 
 
-def test_harbor_builder_constructs_complete_config_from_harbor_inputs(tmp_path):
+def test_harbor_builder_constructs_complete_config_from_harbor_inputs():
     from nemo_fabric.integrations.harbor.fabric_agent import build_harbor_config
     from nemo_fabric.integrations.harbor.models import HarborMcpServer
 
@@ -60,7 +60,6 @@ def test_harbor_builder_constructs_complete_config_from_harbor_inputs(tmp_path):
         adapter_id="demo.fabric.smoke",
         workspace="/testbed",
         model_name="openai/gpt-5.4",
-        skills_dir=tmp_path / "skills",
         mcp_servers=(
             HarborMcpServer(
                 name="remote",
@@ -85,8 +84,7 @@ def test_harbor_builder_constructs_complete_config_from_harbor_inputs(tmp_path):
     assert config.mcp.servers["local"].url == "mcp-server"
     assert config.mcp.servers["local"].args == ["--stdio"]
     assert "args" not in config.mcp.servers["local"].extra_fields
-    assert config.skills is not None
-    assert config.skills.paths == [str(tmp_path / "skills")]
+    assert config.skills is None
     assert (
         json.loads(json.dumps(config.to_mapping()))["metadata"]["name"]
         == "harbor-smoke"
@@ -553,7 +551,6 @@ def test_swebench_matrix_translates_harbor_inputs_to_typed_config(tmp_path: Path
         workspace="/testbed",
         telemetry="relay",
         model_name="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        skills_dir="/harbor/skills",
         mcp_servers=tuple(
             HarborMcpServer.model_validate(server.model_dump(mode="python"))
             for server in load_mcp_servers(SWEBENCH_MCP_CONFIG)
@@ -587,8 +584,7 @@ def test_swebench_matrix_translates_harbor_inputs_to_typed_config(tmp_path: Path
     assert (
         relay.models["default"].model == "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
     )
-    assert relay.skills is not None
-    assert relay.skills.paths == ["/harbor/skills"]
+    assert relay.skills is None
     assert relay.mcp is not None
     assert set(relay.mcp.servers) == {"fabric-repo-inspector"}
     assert relay.mcp.servers["fabric-repo-inspector"].args == [
