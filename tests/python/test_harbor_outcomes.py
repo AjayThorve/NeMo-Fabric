@@ -84,7 +84,7 @@ async def test_cancellation_takes_precedence_over_error_classification(bridge):
     document["status"] = "cancelled"
     document["error"] = {
         "stage": "invoke",
-        "code": "host_timeout",
+        "code": "timeout",
         "message": "cancelled",
         "retryable": False,
     }
@@ -213,3 +213,94 @@ async def test_completed_wrong_answer_is_not_an_execution_failure(bridge):
     document["metadata"]["verifier_reward"] = 0
     await agent.run("test", environment, AgentContext())
     assert agent._result_path.is_file()
+
+
+@pytest.mark.parametrize(
+    ("code", "exception"),
+    [("timeout", TimeoutError), ("connection_failed", RuntimeError)],
+)
+async def test_bridge_classifies_only_canonical_deadline(bridge, code, exception):
+    from harbor.models.agent.context import AgentContext
+
+    agent, environment, document = bridge
+    document["status"] = "failed"
+    document["error"] = {
+        "stage": "invoke",
+        "code": code,
+        "message": "timeout-looking diagnostic",
+        "retryable": False,
+    }
+    with pytest.raises(exception) as caught:
+        await agent.run("test", environment, AgentContext())
+    assert type(caught.value) is exception
+
+
+@pytest.mark.parametrize(
+    ("code", "exception"),
+    [("timeout", TimeoutError), ("configuration_failed", RuntimeError)],
+)
+async def test_bridge_retains_runner_failure_record(bridge, code, exception):
+    from harbor.models.agent.context import AgentContext
+
+    agent, environment, document = bridge
+    document.clear()
+    document["runner_error"] = {
+        "stage": "start",
+        "code": code,
+        "message": "startup failure",
+        "retryable": False,
+    }
+    environment.exec.return_value.return_code = 1
+    context = AgentContext()
+    with pytest.raises(exception):
+        await agent.run("test", environment, context)
+    agent.populate_context_post_run(context)
+    assert context.metadata["fabric"]["runner_error"] == document["runner_error"]
+
+
+@pytest.mark.parametrize("stage", ["start", "invoke", "stop"])
+def test_runner_serializes_structured_deadline(runner_cli, monkeypatch, stage):
+    from nemo_fabric import FabricRuntimeError
+    from nemo_fabric.integrations.harbor import runner
+
+    monkeypatch.setattr(
+        runner,
+        "run",
+        AsyncMock(
+            side_effect=FabricRuntimeError("deadline", stage=stage, code="timeout")
+        ),
+    )
+    with pytest.raises(SystemExit) as caught:
+        runner.main()
+    assert caught.value.code == 1
+    assert json.loads(runner_cli.read_text())["runner_error"] == {
+        "stage": stage,
+        "code": "timeout",
+        "message": "deadline",
+        "retryable": False,
+    }
+
+
+def test_runner_unexpected_failure_does_not_expose_inputs(runner_cli, monkeypatch):
+    from nemo_fabric.integrations.harbor import runner
+
+    monkeypatch.setattr(
+        runner, "run", AsyncMock(side_effect=ValueError("secret-sentinel"))
+    )
+    with pytest.raises(SystemExit):
+        runner.main()
+    evidence = runner_cli.read_text()
+    assert "secret-sentinel" not in evidence
+    assert json.loads(evidence)["runner_error"]["code"] is None
+
+
+def test_runner_invalid_spec_preserves_safe_evidence(runner_cli):
+    # argv was set by the fixture; invalid payloads must not persist Pydantic inputs.
+    spec = runner_cli.with_name("spec.json")
+    spec.write_text('{"unexpected":"secret-sentinel"}', encoding="utf-8")
+    from nemo_fabric.integrations.harbor import runner
+
+    with pytest.raises(SystemExit):
+        runner.main()
+    assert "secret-sentinel" not in runner_cli.read_text()
+    assert "ValidationError" in runner_cli.read_text()

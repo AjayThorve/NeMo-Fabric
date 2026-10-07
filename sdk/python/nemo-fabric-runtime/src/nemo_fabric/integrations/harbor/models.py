@@ -48,3 +48,22 @@ class FabricRunPayload(BaseModel):
     config_base_dir: PurePosixPath
     logs_dir: PurePosixPath = PurePosixPath("/logs/agent")
     request: RunRequest
+
+
+class FabricRunnerError(BaseModel):
+    """Failure before the SDK can return a normalized RunResult."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: str | None = None
+    code: str | None = None
+    message: str
+    retryable: bool = False
+
+
+class FabricRunnerFailure(BaseModel):
+    """Machine-readable runner failure, distinct from an invocation result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    runner_error: FabricRunnerError

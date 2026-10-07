@@ -20,6 +20,7 @@ from nemo_fabric.errors import (
     FabricError,
     FabricNativeUnavailableError,
     FabricRuntimeError,
+    _runtime_error,
 )
 from nemo_fabric.models import FabricConfig, RunRequest
 from nemo_fabric.runtime import (
@@ -423,7 +424,7 @@ class Fabric:
             raise
         except Exception as error:
             await close_start_resources()
-            raise FabricRuntimeError(str(error), stage="start") from error
+            raise _runtime_error(error, stage="start") from error
         except BaseException:
             await close_start_resources()
             raise
@@ -482,7 +483,7 @@ class Fabric:
             if isinstance(error, (asyncio.CancelledError, FabricError)):
                 raise
             if isinstance(error, Exception):
-                raise FabricRuntimeError(str(error), stage="start") from error
+                raise _runtime_error(error, stage="start") from error
             raise
         return Service(client=self, plan=plan, service=handle)
 
@@ -541,7 +542,7 @@ class Fabric:
             if isinstance(error, (asyncio.CancelledError, FabricError)):
                 raise
             if isinstance(error, Exception):
-                raise FabricRuntimeError(str(error), stage="start") from error
+                raise _runtime_error(error, stage="start") from error
             raise
         return Service(client=self, plan=plan, service=handle)
 

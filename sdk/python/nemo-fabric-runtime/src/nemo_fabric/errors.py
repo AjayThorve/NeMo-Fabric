@@ -58,6 +58,15 @@ class FabricRuntimeError(FabricError):
     """Failure while starting, invoking, stopping, or otherwise driving a runtime."""
 
 
+def _runtime_error(error: Exception, *, stage: str) -> FabricRuntimeError:
+    """Preserve native deadline identity without inspecting diagnostic text."""
+    return FabricRuntimeError(
+        str(error),
+        stage=stage,
+        code="timeout" if isinstance(error, TimeoutError) else None,
+    )
+
+
 class FabricStateError(FabricRuntimeError):
     """Operation rejected because a local runtime is in the wrong state."""
 
