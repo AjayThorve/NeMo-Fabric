@@ -119,8 +119,6 @@ uv run --extra harbor harbor run \
   --ak fabric_adapter_id=nvidia.fabric.claude \
   --ak 'fabric_harness_settings={"permission_mode":"bypassPermissions"}' \
   --ak 'fabric_environment_env={"IS_SANDBOX":"1"}' \
-  --ak fabric_max_turns=75 \
-  --ak fabric_runtime_timeout_seconds=1800 \
   --ak fabric_config_base_dir=/opt/fabric-calculator \
   --ak fabric_workspace=/app \
   --ak fabric_max_turns=20 \
