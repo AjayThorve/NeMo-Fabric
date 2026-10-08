@@ -184,7 +184,9 @@ def fake_sdks_fixture(monkeypatch):
                 raise recorder["stream_error"]
             recorder["astream_agent"] = agent_name
             recorder["astream_recursion_limit"] = recorder.get(
-                "bound_recursion_limit" if agent_name == "bound" else "original_recursion_limit"
+                "bound_recursion_limit"
+                if agent_name == "bound"
+                else "original_recursion_limit"
             )
             recorder["config"] = config
             recorder["subgraphs"] = subgraphs
@@ -795,6 +797,43 @@ async def test_request_id_relay_correlation(
     assert fake_relay["scope_metadata"] == [expected_metadata]
     if expected_contexts:
         assert fake_relay["used_propagation_stacks"] == fake_relay["propagation_stacks"]
+
+
+SESSION_ROOT = "018f47a4-0000-7d94-8e61-9f0f89b5d312"
+REQUEST_UUID = "018f47a4-3af7-7d94-8e61-9f0f89b5d312"
+
+
+@pytest.mark.parametrize(
+    ("request_id", "expected_parent"),
+    [(REQUEST_UUID, REQUEST_UUID), ("request-1", SESSION_ROOT)],
+)
+async def test_typed_session_root_roots_relay_propagation(
+    tmp_path,
+    make_payload,
+    monkeypatch,
+    fake_relay,
+    request_id,
+    expected_parent,
+):
+    monkeypatch.setattr(
+        adapter.common_utils,
+        "load_relay_plugin_config",
+        lambda _payload: {"version": 1, "components": []},
+    )
+    payload = make_payload(tmp_path)
+    payload["request"]["request_id"] = request_id
+    payload["request"]["relay_session_root"] = SESSION_ROOT
+    payload["request"]["context"] = {"relay_session_root": REQUEST_UUID}
+    payload["runtime_context"]["telemetry"] = {
+        "relay_enabled": True,
+        "metadata": {"telemetry_providers": ["relay"]},
+    }
+
+    await invoke_once(payload)
+
+    assert fake_relay["propagation_contexts"] == [(expected_parent, SESSION_ROOT)]
+    assert fake_relay["scope_metadata"][0]["nemo_fabric_session_root"] == SESSION_ROOT
+    assert fake_relay["used_propagation_stacks"] == fake_relay["propagation_stacks"]
 
 
 async def test_ambient_relay_config_fails_runtime_start_before_agent_creation(
@@ -1645,7 +1684,9 @@ async def test_local_shell_backend_requires_workspace(tmp_path, make_payload):
     }
     payload["config"]["tools"] = {"enabled": ["execute"]}
 
-    with pytest.raises(adapter.AdapterConfigError, match="requires environment.workspace"):
+    with pytest.raises(
+        adapter.AdapterConfigError, match="requires environment.workspace"
+    ):
         await adapter.DeepAgentsRuntime().start(lifecycle_start_payload(payload))
 
 
@@ -1690,11 +1731,7 @@ async def test_local_shell_backend_accepts_explicit_execute_policy(
     ("settings", "error_path"),
     [
         (
-            {
-                "interrupt_on": {
-                    "execute": {"allowed_decisions": ["approve", "reject"]}
-                }
-            },
+            {"interrupt_on": {"execute": {"allowed_decisions": ["approve", "reject"]}}},
             "interrupt_on.execute",
         ),
         (
@@ -1813,9 +1850,7 @@ async def test_omitted_max_turns_preserves_deepagents_default(
     assert fake_sdks["astream_recursion_limit"] is None
 
 
-async def test_recursion_limit_failure_is_normalized(
-    tmp_path, make_payload, fake_sdks
-):
+async def test_recursion_limit_failure_is_normalized(tmp_path, make_payload, fake_sdks):
     fake_sdks["stream_error"] = GraphRecursionError("internal limit details")
 
     result = await invoke_once(make_payload(tmp_path))
