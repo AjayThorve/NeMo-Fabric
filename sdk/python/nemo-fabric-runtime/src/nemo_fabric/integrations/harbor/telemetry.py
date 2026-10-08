@@ -125,8 +125,12 @@ def _finalized_relay_atif_paths(result: RunResult, logs_dir: Path) -> list[Path]
             "finalized ATIF root escapes the Harbor logs directory"
         )
     output = result.to_mapping()["output"]
-    relay_runtime = output.get("relay_runtime", {}) if isinstance(output, dict) else {}
-    config_path = relay_runtime.get("plugin_config_path")
+    relay_runtime = output.get("relay_runtime") if isinstance(output, dict) else None
+    config_path = (
+        relay_runtime.get("plugin_config_path")
+        if isinstance(relay_runtime, dict)
+        else None
+    )
     if not isinstance(config_path, str):
         return paths
     plugin_path = _resolve_artifact_path(Path(config_path), logs_dir)
@@ -136,16 +140,30 @@ def _finalized_relay_atif_paths(result: RunResult, logs_dir: Path) -> list[Path]
     ):
         raise TelemetryValidationError("finalized Relay config is outside this runtime")
     config = tomllib.loads(plugin_path.read_text(encoding="utf-8"))
+    components = config.get("components", [])
+    if not isinstance(components, list):
+        raise TelemetryValidationError("finalized Relay components must be an array")
     for telemetry in result.telemetry:
         if telemetry.provider != "relay":
             continue
-        for component in config.get("components", []):
+        for component in components:
+            if not isinstance(component, dict):
+                raise TelemetryValidationError(
+                    "finalized Relay component must be a table"
+                )
             if (
                 component.get("kind") != "observability"
                 or component.get("enabled") is False
             ):
                 continue
-            atif = component.get("config", {}).get("atif", {})
+            component_config = component.get("config", {})
+            if not isinstance(component_config, dict):
+                raise TelemetryValidationError("finalized Relay config must be a table")
+            atif = component_config.get("atif", {})
+            if not isinstance(atif, dict):
+                raise TelemetryValidationError(
+                    "finalized Relay ATIF config must be a table"
+                )
             if atif.get("enabled") is not True or atif.get("storage"):
                 continue
             if not isinstance(atif.get("output_directory"), str) or not isinstance(
@@ -171,8 +189,10 @@ def _finalized_relay_atif_paths(result: RunResult, logs_dir: Path) -> list[Path]
                 raise TelemetryValidationError(
                     "finalized ATIF filename template must be a basename"
                 )
-            pattern = "[^/]+".join(
-                re.escape(part) for part in re.split(r"\{[^{}]+\}", template)
+            # Adjacent placeholders need a minimum length, not overlapping wildcards.
+            pattern = "".join(
+                f"[^/]{{{part.count('{')},}}" if index % 2 else re.escape(part)
+                for index, part in enumerate(re.split(r"((?:\{[^{}]+\})+)", template))
             )
             for path in directory.iterdir():
                 if not re.fullmatch(pattern, path.name) or not path.is_file():

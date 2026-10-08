@@ -120,11 +120,23 @@ def test_finalized_relay_atif_collected_only_after_shutdown(
     assert summary["atif"]["files"] == ([str(path)] if runtime_stopped else [])
 
 
-@pytest.mark.parametrize("mode", ["other-runtime", "symlink", "ambiguous", "malformed"])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "other-runtime",
+        "symlink",
+        "ambiguous",
+        "malformed",
+        "plugin-symlink",
+        "plugin-malformed",
+        "nested-template",
+    ],
+)
 def test_finalized_relay_atif_rejects_unsafe_or_invalid_artifacts(
     finalized_relay_run, mode
 ):
     logs, path, mapping = finalized_relay_run
+    plugin = logs / "fabric-artifacts" / ".fabric" / "runtime-1" / "plugins.toml"
     atif = mapping["telemetry"][0]["metadata"]["relay_config"]["components"][0][
         "config"
     ]["atif"]
@@ -140,6 +152,16 @@ def test_finalized_relay_atif_rejects_unsafe_or_invalid_artifacts(
         path.symlink_to(target)
     elif mode == "ambiguous":
         path.with_name("trajectory-second.atif.json").write_bytes(path.read_bytes())
+    elif mode == "plugin-symlink":
+        target = logs / "outside-plugins.toml"
+        plugin.rename(target)
+        plugin.symlink_to(target)
+    elif mode == "plugin-malformed":
+        plugin.write_text("[")
+    elif mode == "nested-template":
+        plugin.write_text(
+            plugin.read_text().replace("trajectory-{session_id}", "nested/{session_id}")
+        )
     else:
         path.write_text("[]")
     with pytest.raises(TelemetryValidationError):
@@ -147,6 +169,57 @@ def test_finalized_relay_atif_rejects_unsafe_or_invalid_artifacts(
             RunResult.from_mapping(mapping), logs, strict=True, runtime_stopped=True
         )
     assert not (logs / "trajectory.json").exists()
+
+
+@pytest.mark.parametrize("relay_runtime", [None, [], "invalid", 1])
+def test_finalized_relay_ignores_unrecognized_output(
+    finalized_relay_run, relay_runtime
+):
+    logs, _, mapping = finalized_relay_run
+    mapping["output"]["relay_runtime"] = relay_runtime
+    summary = publish_telemetry_evidence(
+        RunResult.from_mapping(mapping), logs, strict=True, runtime_stopped=True
+    )
+    assert summary["status"] == "not_emitted"
+    assert not (logs / "trajectory.json").exists()
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        "components = 1",
+        "components = [1]",
+        '[[components]]\nkind = "observability"\nconfig = 1',
+        '[[components]]\nkind = "observability"\n[components.config]\natif = 1',
+    ],
+)
+def test_finalized_relay_malformed_tables_are_telemetry_failures(
+    finalized_relay_run, config
+):
+    logs, _, mapping = finalized_relay_run
+    plugin = logs / "fabric-artifacts" / ".fabric" / "runtime-1" / "plugins.toml"
+    plugin.write_text(config)
+    summary = publish_telemetry_evidence(
+        RunResult.from_mapping(mapping), logs, runtime_stopped=True
+    )
+    assert summary["status"] == "failed"
+    assert not (logs / "trajectory.json").exists()
+
+
+@pytest.mark.parametrize("filename", ["a" * 40 + ".json", "a" * 200 + ".txt"])
+def test_finalized_relay_adjacent_template_placeholders(finalized_relay_run, filename):
+    logs, path, mapping = finalized_relay_run
+    path.rename(path.with_name(filename))
+    plugin = logs / "fabric-artifacts" / ".fabric" / "runtime-1" / "plugins.toml"
+    plugin.write_text(
+        plugin.read_text().replace(
+            "trajectory-{session_id}.atif.json", "{session_id}" * 40 + ".json"
+        )
+    )
+    summary = publish_telemetry_evidence(
+        RunResult.from_mapping(mapping), logs, strict=True, runtime_stopped=True
+    )
+    assert (summary["status"] == "succeeded") is filename.endswith(".json")
 
 
 def test_publish_telemetry_validates_and_promotes_atif(tmp_path: Path):
