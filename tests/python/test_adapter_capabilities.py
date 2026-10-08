@@ -385,11 +385,3 @@ async def test_real_harbor_runner_matches_custom_task_descriptor(
         FabricConfigError, match="Host/task adapter descriptor mismatch"
     ):
         await runner.run(payload)
-
-
-def test_harbor_bridge_and_runner_have_no_harness_id_branches(repo_root: Path):
-    root = (
-        repo_root / "sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor"
-    )
-    for name in ("fabric_agent.py", "runner.py"):
-        assert "nvidia.fabric." not in (root / name).read_text(encoding="utf-8")

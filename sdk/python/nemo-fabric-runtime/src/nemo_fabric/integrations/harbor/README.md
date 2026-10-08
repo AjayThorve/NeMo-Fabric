@@ -73,6 +73,8 @@ provider that declares ATIF output; Relay also requires an explicitly enabled,
 unambiguous observability component. These are admission claims, not proof that
 a trajectory was produced.
 
+**Known limitation:** Harbor releases that gate trace export on the agent class's static ATIF flag cannot export NeMo Fabric trajectories, even when the selected instance supports ATIF and a trajectory exists. The class default remains conservative. The exporter fix is proposed in [Harbor PR #3528](https://github.com/harbor-framework/harbor/pull/3528); trace export through Harbor remains unavailable until a Harbor release includes that fix. Recorded trajectory artifacts remain available independently of Harbor's exporter.
+
 For an external adapter, pass `fabric_adapter_descriptor=/host/adapter.fabric-adapter.json`
 with its canonical descriptor. Separately, use `fabric_discovery_paths` to
 locate its executable descriptor inside the task. Host inspection does not read
