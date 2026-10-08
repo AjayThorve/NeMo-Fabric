@@ -78,6 +78,7 @@ async def run(payload: FabricRunPayload) -> RunResult:
         Path(payload.logs_dir),
         harbor_session_id=payload.request.context.get("harbor_session_id"),
         harbor_context_id=payload.request.context.get("harbor_context_id"),
+        runtime_stopped=True,
     )
     return result
 
