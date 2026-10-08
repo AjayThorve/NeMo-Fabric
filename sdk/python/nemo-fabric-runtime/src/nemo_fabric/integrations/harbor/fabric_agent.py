@@ -411,6 +411,11 @@ else:
             self._capability_profile = inspect_adapter(
                 self._build_config(), self._host_descriptor
             )
+            if self.skills_dir is not None and not self._capability_profile.skills:
+                raise FabricConfigError(
+                    f"Cannot confirm requested Harbor skills for {self.fabric_adapter_id}: "
+                    "host descriptor metadata must declare skills support"
+                )
             self.capabilities = AgentCapabilities.model_validate(
                 {
                     field: supported

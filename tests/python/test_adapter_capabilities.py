@@ -56,7 +56,7 @@ def custom_config_fixture():
         ("nvidia.fabric.cline", True, True),
         ("nvidia.fabric.kilo", True, True),
         ("nvidia.fabric.opencode", True, True),
-        ("nvidia.fabric.pi", True, False),
+        ("nvidia.fabric.pi", True, True),
         ("nvidia.fabric.qwen", True, True),
     ],
 )
@@ -335,10 +335,25 @@ def test_harbor_rejects_unsupported_mcp_before_setup(tmp_path):
     with pytest.raises(FabricConfigError, match="mcp"):
         FabricAgent(
             logs_dir=tmp_path,
-            fabric_adapter_id="nvidia.fabric.pi",
+            fabric_adapter_id="nvidia.fabric.mini-swe-agent",
             mcp_servers=[
                 MCPServerConfig(name="tools", transport="stdio", command="tool-server")
             ],
+        )
+
+
+@pytest.mark.usefixtures("requires_harbor")
+@pytest.mark.parametrize(
+    "adapter_id", ["nvidia.fabric.mini-swe-agent", "example.fabric.unknown"]
+)
+def test_harbor_rejects_unconfirmed_skill_collection_before_setup(tmp_path, adapter_id):
+    from nemo_fabric.integrations.harbor import FabricAgent
+
+    with pytest.raises(FabricConfigError, match="skills"):
+        FabricAgent(
+            logs_dir=tmp_path,
+            fabric_adapter_id=adapter_id,
+            skills_dir="/task/only/skills",
         )
 
 

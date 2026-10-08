@@ -44,16 +44,37 @@ def mock_fabric_fixture(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture(name="skill_payload")
-def skill_payload_fixture(tmp_path: Path, skill_collection: Path):
+def skill_payload_fixture(
+    tmp_path: Path, skill_collection: Path, skill_descriptor: Path
+):
     payload = FabricAgent(
         logs_dir=tmp_path / "logs",
         fabric_adapter_id="acme.skills",
+        fabric_adapter_descriptor=skill_descriptor,
         skills_dir=str(skill_collection),
     )._build_spec("Use the uploaded skills.")
     # Harbor's host-side task paths are POSIX, even on a Windows host. Simulate
     # task-side filesystem access using this host's native temporary directory.
     payload.config_base_dir = PurePosixPath(tmp_path.as_posix())
     return payload
+
+
+@pytest.fixture(name="skill_descriptor")
+def skill_descriptor_fixture(tmp_path: Path):
+    path = tmp_path / "skills.fabric-adapter.json"
+    path.write_text(
+        json.dumps(
+            {
+                "contract_version": "fabric.adapter/v1alpha2",
+                "adapter_id": "acme.skills",
+                "adapter_kind": "python",
+                "runner": {"module": "not_installed.skills"},
+                "config": {"accepts": ["skills"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 @pytest.mark.parametrize(
@@ -73,7 +94,8 @@ async def test_harbor_collection_is_accepted_by_individual_path_adapters(
     )._build_spec("Use both skills.")
     payload.config_base_dir = PurePosixPath(tmp_path.as_posix())
 
-    async def validate(config, *, base_dir, request):
+    async def validate(config, *, base_dir, request, expected_descriptor_sha256):
+        assert expected_descriptor_sha256 == payload.adapter_descriptor_sha256
         adapter_config = AgentConfig.from_mapping(
             {"skills": config.skills.to_mapping()}
         )
@@ -112,10 +134,13 @@ async def test_harbor_collection_is_accepted_by_individual_path_adapters(
     mock_fabric.run.assert_awaited_once()
 
 
-def test_host_transports_task_path_without_reading_host_filesystem(tmp_path: Path):
+def test_host_transports_task_path_without_reading_host_filesystem(
+    tmp_path: Path, skill_descriptor: Path
+):
     payload = FabricAgent(
         logs_dir=tmp_path,
         fabric_adapter_id="acme.skills",
+        fabric_adapter_descriptor=skill_descriptor,
         skills_dir="/harbor/task-only-skills",
     )._build_spec("Use skills.")
     assert str(payload.skills_dir) == "/harbor/task-only-skills"
