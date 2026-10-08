@@ -47,6 +47,108 @@ def task_artifact(name: str, kind: str, path: Path, logs_dir: Path) -> dict[str,
     return artifact(name, kind, Path("/logs/agent") / path.relative_to(logs_dir))
 
 
+@pytest.fixture(name="finalized_relay_run")
+def finalized_relay_run_fixture(tmp_path):
+    logs = tmp_path / "agent"
+    directory = logs / "fabric-artifacts" / "relay" / "runtime-1"
+    directory.mkdir(parents=True)
+    path = directory / "trajectory-session.atif.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "ATIF-v1.7",
+                "session_id": "relay-session",
+                "agent": {"name": "pi", "version": "1.0"},
+                "steps": [{"step_id": 1, "source": "agent", "message": "done"}],
+            }
+        )
+    )
+    mapping = make_result().to_mapping()
+    mapping["artifacts"]["root"] = "/logs/agent/fabric-artifacts"
+    plugin = logs / "fabric-artifacts" / ".fabric" / "runtime-1" / "plugins.toml"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_text("""
+[[components]]
+kind = "observability"
+enabled = true
+[components.config.atif]
+enabled = true
+output_directory = "/logs/agent/fabric-artifacts/relay/runtime-1"
+filename_template = "trajectory-{session_id}.atif.json"
+""")
+    mapping["output"]["relay_runtime"] = {
+        "plugin_config_path": "/logs/agent/fabric-artifacts/.fabric/runtime-1/plugins.toml"
+    }
+    mapping["telemetry"] = [
+        {
+            "provider": "relay",
+            "kind": "trace",
+            "metadata": {
+                "relay_config": {
+                    "components": [
+                        {
+                            "kind": "observability",
+                            "enabled": True,
+                            "config": {
+                                "atif": {
+                                    "enabled": True,
+                                    "output_directory": "/logs/agent/fabric-artifacts/relay/runtime-1",
+                                    "filename_template": "trajectory-{session_id}.atif.json",
+                                }
+                            },
+                        }
+                    ]
+                }
+            },
+        }
+    ]
+    return logs, path, mapping
+
+
+@pytest.mark.parametrize("runtime_stopped", [False, True])
+def test_finalized_relay_atif_collected_only_after_shutdown(
+    finalized_relay_run, runtime_stopped
+):
+    logs, path, mapping = finalized_relay_run
+    summary = publish_telemetry_evidence(
+        RunResult.from_mapping(mapping),
+        logs,
+        strict=True,
+        runtime_stopped=runtime_stopped,
+    )
+    assert (logs / "trajectory.json").exists() is runtime_stopped
+    assert summary["atif"]["files"] == ([str(path)] if runtime_stopped else [])
+
+
+@pytest.mark.parametrize("mode", ["other-runtime", "symlink", "ambiguous", "malformed"])
+def test_finalized_relay_atif_rejects_unsafe_or_invalid_artifacts(
+    finalized_relay_run, mode
+):
+    logs, path, mapping = finalized_relay_run
+    atif = mapping["telemetry"][0]["metadata"]["relay_config"]["components"][0][
+        "config"
+    ]["atif"]
+    if mode == "other-runtime":
+        atif["output_directory"] = "/logs/agent/fabric-artifacts/relay/runtime-other"
+        plugin = logs / "fabric-artifacts" / ".fabric" / "runtime-1" / "plugins.toml"
+        plugin.write_text(
+            plugin.read_text().replace("relay/runtime-1", "relay/runtime-other")
+        )
+    elif mode == "symlink":
+        target = logs / "outside.json"
+        path.rename(target)
+        path.symlink_to(target)
+    elif mode == "ambiguous":
+        path.with_name("trajectory-second.atif.json").write_bytes(path.read_bytes())
+    else:
+        path.write_text("[]")
+    with pytest.raises(TelemetryValidationError):
+        publish_telemetry_evidence(
+            RunResult.from_mapping(mapping), logs, strict=True, runtime_stopped=True
+        )
+    assert not (logs / "trajectory.json").exists()
+
+
 def test_publish_telemetry_validates_and_promotes_atif(tmp_path: Path):
     logs = tmp_path / "agent"
     logs.mkdir()
@@ -94,7 +196,9 @@ def test_publish_telemetry_validates_and_promotes_atif(tmp_path: Path):
     assert summary["atif"]["steps"] == 1
     assert summary["atif"]["validator"] == "fabric_structural"
     assert (logs / "trajectory.json").read_bytes() == atif.read_bytes()
-    assert json.loads((logs / "telemetry-validation.json").read_text())["status"] == ("succeeded")
+    assert json.loads((logs / "telemetry-validation.json").read_text())["status"] == (
+        "succeeded"
+    )
 
 
 def test_publish_telemetry_accepts_relay_owned_atif_session_id(tmp_path: Path):
@@ -260,7 +364,9 @@ def test_publish_telemetry_rejects_structurally_invalid_atif(tmp_path: Path):
         encoding="utf-8",
     )
 
-    with pytest.raises(TelemetryValidationError, match="steps must be a non-empty array"):
+    with pytest.raises(
+        TelemetryValidationError, match="steps must be a non-empty array"
+    ):
         publish_telemetry_evidence(
             make_result(task_artifact("atif", "atif", atif, logs)),
             logs,
