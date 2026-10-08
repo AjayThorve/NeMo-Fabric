@@ -58,3 +58,44 @@ adapter-specific timeout codes are not automatically reclassified.
 ## Invocation Accounting
 
 The integration projects normalized `RunResult.usage` into Harbor's `AgentContext` without requiring NeMo Relay or ATIF. Harbor input counts include cache: inclusive NeMo Fabric input is copied unchanged, while exclusive input is combined with cache only when both counts are known. If input semantics are unknown, Harbor input remains unknown unless the adapter explicitly reports zero cache tokens. Legacy results remain valid, but their input count needs explicit cache semantics or an ATIF fallback to populate Harbor's inclusive count; the original values remain in result metadata. Unknown counts and costs remain `None`; estimates are not promoted to reported cost. ATIF metrics fill only missing fields and are never added to normalized usage. The same collection path applies to unsuccessful results that contain usage.
+
+## Host Admission And Task Execution
+
+The `nemo-fabric[harbor]` extra installs a matching
+`nemo-fabric-adapter-catalog` release on the Harbor host. The catalog contains
+descriptor metadata, not executable adapters. The host does not need to install
+each harness SDK to derive the agent's instance capabilities.
+
+`FabricAgent` uses the shared `inspect_adapter()` API and the existing native
+planner to validate the requested configuration. Skills and MCP support come
+from the descriptor's accepted configuration sections. ATIF requires a selected
+provider that declares ATIF output; Relay also requires an explicitly enabled,
+unambiguous observability component. These are admission claims, not proof that
+a trajectory was produced.
+
+**Known limitation:** Released Harbor versions that gate trace export on the agent class's static ATIF flag cannot export NeMo Fabric trajectories, even when the selected instance supports ATIF and a trajectory exists. The class default remains conservative. To export through Harbor, use a build containing the fix in [Harbor PR #3528](https://github.com/harbor-framework/harbor/pull/3528), or a subsequent release that includes it. Recorded trajectory artifacts remain available independently of Harbor's exporter.
+
+For an external adapter, pass `fabric_adapter_descriptor=/host/adapter.fabric-adapter.json`
+with its canonical descriptor. Separately, use `fabric_discovery_paths` to
+locate its executable descriptor inside the task. Host inspection does not read
+task-local paths or add catalog resources to execution discovery.
+
+When metadata is unavailable, basic execution remains possible with false
+optional-feature claims. Requested skills, MCP, or telemetry fail clearly rather
+than being silently dropped. Malformed metadata is an error. Registered workflows
+require target-specific admission and are not supported by this standalone path.
+
+The runner compares the host's normalized descriptor fingerprint with the
+descriptor in its actual execution plan before starting the harness. A mismatch
+fails with instructions to align the host catalog and task adapter releases or
+external metadata. Pin compatible versions in both environments. This check
+detects descriptor drift; it is not runtime-observed software provenance.
+
+## Explicit Harness Recipes
+
+The bridge does not inject harness-specific permissions, environment variables,
+or turn and timeout limits. Specify those choices in the benchmark recipe through
+`fabric_harness_settings`, `fabric_environment_env`, `fabric_max_turns`, and
+`fabric_runtime_timeout_seconds`. Omitted values use the adapter's normal
+behavior. The example commands include the sandbox and permission settings
+needed by their tasks.

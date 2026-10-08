@@ -15,6 +15,7 @@ from contextlib import AsyncExitStack
 from typing import Any
 
 from nemo_fabric._collector_client import _AtofCollectorClient
+from nemo_fabric.capabilities import _verify_adapter_descriptor
 from nemo_fabric.errors import (
     FabricConfigError,
     FabricError,
@@ -162,6 +163,7 @@ class Fabric:
         base_dir: str | os.PathLike[str] | None = None,
         input: Any = None,
         request: RunRequest | None = None,
+        expected_descriptor_sha256: str | None = None,
     ) -> RunResult:
         """Execute one complete start, invoke, and stop lifecycle.
 
@@ -175,6 +177,8 @@ class Fabric:
             base_dir: Base directory for resolving relative paths.
             input: JSON-compatible invocation input.
             request: Complete validated ``RunRequest``.
+            expected_descriptor_sha256: Optional host-inspection fingerprint.
+                Reject descriptor drift before starting the runtime.
 
         Returns:
             The normalized ``RunResult``, including output, artifacts,
@@ -190,6 +194,8 @@ class Fabric:
         """
 
         plan = await _call_blocking(lambda: self.plan(config, base_dir=base_dir))
+        if expected_descriptor_sha256 is not None:
+            _verify_adapter_descriptor(plan, expected_descriptor_sha256)
         request_payload = _run_request_payload(
             input=input,
             request=request,
@@ -209,6 +215,7 @@ class Fabric:
         launch_collector: bool | None = None,
         completion_wait_timeout: float = 1.0,
         service: Service | None = None,
+        expected_descriptor_sha256: str | None = None,
     ) -> Runtime:
         """Start a stateful runtime for one or more ordered invocations.
 
@@ -237,6 +244,9 @@ class Fabric:
                 ignored unless Pi streaming uses the embedded collector.
             service: Optional prepared or attached service. When supplied, the
                 runtime connects to that service instead of creating its own.
+            expected_descriptor_sha256: Optional descriptor fingerprint from host
+                inspection. Matching metadata does not qualify an attached service's
+                deployment-owned skills or MCP configuration.
 
         Returns:
             An active ``Runtime``. Use it as an asynchronous context
@@ -384,6 +394,8 @@ class Fabric:
             plan = await _call_blocking(
                 lambda: self.plan(runtime_config, base_dir=base_dir)
             )
+            if expected_descriptor_sha256 is not None:
+                _verify_adapter_descriptor(plan, expected_descriptor_sha256)
             native = self._require_native_module("start_runtime")
         except BaseException:
             await close_start_resources()

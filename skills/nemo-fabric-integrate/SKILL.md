@@ -311,6 +311,15 @@ print(plan.adapter.adapter_id, report.status)
   misspelled adapter settings fail before diagnostics or runtime startup. A
   resolved descriptor without a settings schema accepts only an empty settings
   map.
+- For a separate admission host, call public `inspect_adapter(config, descriptor)`
+  with matching catalog or canonical external metadata. The immutable
+  `AdapterCapabilityProfile` has `adapter_id`, `descriptor_sha256`, `skills`,
+  `mcp`, and `atif` fields. It does not import harness SDKs or read task-local
+  discovery paths. Missing metadata makes conservative claims and rejects
+  requested optional features. Pass `expected_descriptor_sha256=profile.descriptor_sha256`
+  to task-side `run()` or `start_runtime()` to reject descriptor drift before
+  startup. This standalone profile does not qualify workflow targets or attached
+  services. Declared support is not runtime provenance or proof of an artifact.
 
 ## Consume Results And Handle Errors
 

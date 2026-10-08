@@ -29,7 +29,7 @@ Each call returns a fresh dictionary containing the canonical descriptor object.
 
 ## Supported API
 
-Consumers should use `get_adapter_descriptor()` and `get_target_descriptor()`. Returned descriptors follow the [Fabric adapter descriptor contract](../../../docs/adapter-contract/README.md). The package's resource files, including `catalog.json`, their layout, and their metadata fields are internal implementation details and can change between releases. Do not read these resources directly; the lookup functions keep consumers independent of the bundle's storage format.
+Consumers should use `get_adapter_descriptor()` and `get_target_descriptor()`. Returned descriptors follow the [Fabric adapter descriptor contract](https://github.com/NVIDIA/NeMo-Fabric/blob/main/docs/adapter-contract/README.md). The package's resource files, including `catalog.json`, their layout, and their metadata fields are internal implementation details and can change between releases. Do not read these resources directly; the lookup functions keep consumers independent of the bundle's storage format.
 
 ## Metadata Is Not Execution
 
@@ -37,16 +37,7 @@ The bundle is a package resource, not an installed descriptor under `share/nemo-
 
 A snapshot claim is not proof of the task environment's capabilities. Pin compatible releases and compare the snapshot with the actual task descriptor before relying on it. A provider declaring ATIF support does not establish that it is enabled or that an artifact was produced. Capability normalization, host/task compatibility enforcement, and runtime-observed provenance are separate concerns, not implemented by this package.
 
-## Maintain The Bundle
-
-`scripts/ci/generate_adapter_catalog.py` collects canonical descriptors from leaf packages under `adapters/python/` and `adapters/typescript/`. It also includes targets under each leaf's `targets/` directory. Common support packages, presets, fixtures, and source-only external integrations are excluded. There is no adapter-ID allowlist.
-
-The generated `catalog.json` keeps source package names, declared versions, paths, ecosystems, and fingerprints outside the descriptor objects. SHA-256 uses UTF-8 JSON with sorted keys, compact separators, and unescaped Unicode. These fields describe the release snapshot, not software observed during execution. The resource format is versioned separately from the adapter contract; use the lookup functions rather than depending on its layout.
-
-```bash
-just adapter-catalog
-just check-adapter-catalog
-uv build --wheel --sdist --out-dir dist sdk/python/nemo-fabric-adapter-catalog
-```
-
-`just set-version` refreshes the bundle after stamping Python and TypeScript versions. Python tests and wheel builds reject stale bundles. Wheels and source distributions contain the bundle and build independently of the adapter source tree.
+The runtime's public [host inspection API](https://github.com/NVIDIA/NeMo-Fabric/blob/main/docs/sdk/python.mdx#inspect-metadata-on-a-separate-host)
+can validate supplied metadata and derive standalone admission claims. Pass its
+descriptor fingerprint to task-side execution to reject mismatched metadata.
+The catalog itself remains dependency-free and does not perform runtime inspection.

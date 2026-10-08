@@ -52,6 +52,9 @@ class FabricRunPayload(BaseModel):
     skills_dir: PurePosixPath | None = None
     request: RunRequest
     environment_env_names: tuple[str, ...] = ()
+    adapter_descriptor_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
 
     @field_validator("environment_env_names")
     @classmethod

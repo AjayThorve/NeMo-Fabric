@@ -62,10 +62,16 @@ async def run(payload: FabricRunPayload) -> RunResult:
             if resolved not in existing_paths:
                 config.add_skill_path(skill)
                 existing_paths.add(resolved)
+    compatibility = (
+        {"expected_descriptor_sha256": payload.adapter_descriptor_sha256}
+        if payload.adapter_descriptor_sha256 is not None
+        else {}
+    )
     result = await Fabric().run(
         config,
         base_dir=payload.config_base_dir,
         request=payload.request,
+        **compatibility,
     )
     publish_telemetry_evidence(
         result,
