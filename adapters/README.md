@@ -65,6 +65,8 @@ build, and packaging conventions.
 | [Pi](typescript/pi/README.md) | `nvidia.fabric.pi` | `nemo-fabric-adapters-pi` | Node.js 22.19+ |
 | [Qwen Code](typescript/qwen/README.md) | `nvidia.fabric.qwen` | `nemo-fabric-adapters-qwen` | Node.js 22.19+ |
 
+OpenCode, Qwen Code, and Kilo Code require HTTPS for remote model endpoints by default. To use a trusted Docker or Kubernetes HTTP gateway, configure `harness.settings.insecure_http_model_hosts` as described in their adapter READMEs. Kilo Code also supports its existing private IPv4 opt-in.
+
 Shared TypeScript lifecycle utilities live under
 [`typescript/common`](typescript/common/README.md).
 Refer to the [TypeScript adapter workspace guide](typescript/README.md) for

@@ -26,6 +26,8 @@ const expectedByPackage = {
     "dist/index.js",
     "dist/lifecycle.d.ts",
     "dist/lifecycle.js",
+    "dist/model-endpoint.d.ts",
+    "dist/model-endpoint.js",
     "package.json",
   ],
   "nemo-fabric-adapters-cline": [
