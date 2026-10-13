@@ -821,6 +821,16 @@
           "properties": {
             "allow_insecure_http_model_endpoint": {
               "type": "boolean"
+            },
+            "insecure_http_model_hosts": {
+              "description": "Explicitly trusted HTTP model endpoint hostnames, without schemes, ports, paths, or wildcards.",
+              "items": {
+                "maxLength": 253,
+                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
             }
           },
           "type": "object"
@@ -831,7 +841,7 @@
         "name": "nemo-fabric-adapters-kilo",
         "version": "0.5.0"
       },
-      "sha256": "7152726b30807eac897b69a3264bb31f72f5348ce4fa85e1f0ff8b013fb5058b",
+      "sha256": "608aeacfa0cfa5ff7ccd28e3f66cadd53f82780bc882b8577e7e8687dfd3dd07",
       "source": "adapters/typescript/kilo/kilo.fabric-adapter.json"
     },
     "nvidia.fabric.langchain.deepagents": {
@@ -1702,6 +1712,22 @@
         "runner": {
           "command": "bun",
           "script": "dist/cli.js"
+        },
+        "settings_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "insecure_http_model_hosts": {
+              "description": "Explicitly trusted HTTP model endpoint hostnames, without schemes, ports, paths, or wildcards.",
+              "items": {
+                "maxLength": 253,
+                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "type": "object"
         }
       },
       "ecosystem": "typescript",
@@ -1709,7 +1735,7 @@
         "name": "nemo-fabric-adapters-opencode",
         "version": "0.5.0"
       },
-      "sha256": "bda46d332ec5bdcbd43ba2ed9e8fa4cd0ce3e877bf38ae88a8ce8a48dc385406",
+      "sha256": "86175ea45671c92601bf1a132fc0fe91f3de82f19ce8bf4249e9993125c32641",
       "source": "adapters/typescript/opencode/opencode.fabric-adapter.json"
     },
     "nvidia.fabric.openhands": {
@@ -2117,6 +2143,16 @@
         "settings_schema": {
           "additionalProperties": false,
           "properties": {
+            "insecure_http_model_hosts": {
+              "description": "Explicitly trusted HTTP model endpoint hostnames, without schemes, ports, paths, or wildcards.",
+              "items": {
+                "maxLength": 253,
+                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
             "permission_mode": {
               "enum": [
                 "default",
@@ -2135,7 +2171,7 @@
         "name": "nemo-fabric-adapters-qwen",
         "version": "0.5.0"
       },
-      "sha256": "2a3d779d2a6d2fd6c0f772a32f11f19e7c40fe4710e098958b146576eae66137",
+      "sha256": "ffd6ed76db07ac79e04edc6cdc183729b1e569cb67015503b93aea50f951b3d2",
       "source": "adapters/typescript/qwen/qwen.fabric-adapter.json"
     },
     "nvidia.fabric.remote-agent": {
