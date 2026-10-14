@@ -139,3 +139,15 @@ compatibility decisions using the distribution and linkage context.
 - `.pre-commit-config.yaml`
 - `scripts/licensing/license_diff.py`
 - `justfile`
+
+## New Public npm Packages
+
+Run `python3 scripts/ci/check_npm_bootstrap.py` when introducing a public npm
+package. Publication and the check discover the contract and public adapter
+workspaces from manifests; add the adapter to the npm workspace. Complete the
+npm maintainer bootstrap and authenticated trusted-publisher readback in
+[`RELEASING.md`](../../../RELEASING.md#bootstrap-npm-trusted-publishing) before
+release. Public existence alone cannot verify trusted publishing. If the PR
+check reports HTTP 404, ask an authorized npm maintainer to bootstrap the exact
+manifest name, then rerun the check. Do not add CI write tokens or manually
+publish supported versions.

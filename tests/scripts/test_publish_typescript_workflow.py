@@ -81,20 +81,17 @@ def test_publisher_publishes_packages_in_dependency_order():
     )
     assert "Verify published dependencies" not in steps
 
-    package_directories = (
-        "adapter-contract/typescript",
-        "adapters/typescript/common",
-        "adapters/typescript/cline",
-        "adapters/typescript/droid",
-        "adapters/typescript/pi",
-        "adapters/typescript/opencode",
-        "adapters/typescript/qwen",
-        "adapters/typescript/kilo",
+    ordered_steps = list(steps)
+    assert ordered_steps.index("Check npm package bootstrap") < ordered_steps.index(
+        "Publish packages"
     )
-    assert "Verify packages" not in steps
+    assert (
+        steps["Check npm package bootstrap"]["run"]
+        == "python3 scripts/ci/check_npm_bootstrap.py"
+    )
     run = steps["Publish packages"]["run"]
-    positions = [run.index(directory) for directory in package_directories]
-    assert positions == sorted(positions)
+    assert "check_npm_bootstrap.py --list-directories" in run
+    assert 'done < "$RUNNER_TEMP/npm-packages.txt"' in run
     assert "--action publish" in run
 
 
@@ -122,3 +119,13 @@ def test_typescript_ci_accepts_the_created_alpha_tag_ref():
         checkout = workflow["jobs"][job_name]["steps"][0]
         assert checkout["name"] == "Checkout"
         assert checkout["with"]["ref"] == "${{ inputs.ref || github.ref }}"
+
+
+def test_bootstrap_ci_runs_for_all_prs_without_publish_permissions():
+    workflow = _load_workflow(TYPESCRIPT_CI_WORKFLOW)
+    assert "pull_request" in workflow["on"]
+    assert not workflow["on"]["pull_request"]
+    job = workflow["jobs"]["npm-bootstrap"]
+    assert job["permissions"] == {"contents": "read"}
+    assert "environment" not in job
+    assert job["steps"][-1]["run"] == "python3 scripts/ci/check_npm_bootstrap.py"
