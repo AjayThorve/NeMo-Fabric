@@ -123,6 +123,12 @@ routing. `harness_native` assigns a capability to the selected adapter,
 execute it. Scalar fields are validated separately against
 `adapter_descriptor.config.accepts`.
 
+### Environment Values And Names
+
+`environment.env` sets literal values and saves those values in the configuration and run plan. `environment.env_names` lists existing variables to forward from the NeMo Fabric process environment and saves only their names. NeMo Fabric looks up the values and supplies them to the adapter through `RuntimeContext.environment.env`.
+
+For example, use `env={"LOG_LEVEL": "debug"}` for a literal setting and `env_names=["GITHUB_TOKEN"]` to forward a token already available to the NeMo Fabric process. `environment.env` does not expand `$GITHUB_TOKEN` or `${GITHUB_TOKEN}`, and neither field loads a `.env` file. Refer to [Set Environment Values Or Forward Them By Name](../docs/sdk/python.mdx#set-environment-values-or-forward-them-by-name) for examples and runtime refresh behavior.
+
 ### Complete FabricConfig Support
 
 `Core` means NeMo Fabric owns the behavior and applies it uniformly before or around
@@ -151,7 +157,7 @@ and additive extension maps because their support does not vary by adapter:
 | `runtime.artifacts`, `.timeout_seconds` | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core |
 | `runtime.max_turns` | Yes | No | Yes; maps to LangGraph supersteps | Yes; iteration limit | Yes | No | No | Yes; per invocation | No | No | No | No | No | Yes; maps to build-agent steps | No |
 | `environment.provider`, `.control_location`, `.ownership` | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core |
-| `environment.workspace`, `.artifacts`, `.env` | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core |
+| `environment.workspace`, `.artifacts`, `.env`, `.env_names` | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core | Core |
 | `environment.connection`, `.metadata`, `.settings` | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned | Environment-provider-owned |
 | `tools.definitions` | No | No | No | No | No | No | No | No | No | No | No | Yes; trusted local module factories | No | No | No |
 | `tools.enabled`, `.blocked` | Yes | No | Yes | Yes; native selectors are Hermes toolset names | No | No | Yes | Yes; terminal and file editor | Yes; Cline built-in names | Yes; Droid built-in IDs | No | Yes | `tools.blocked`: Yes; `tools.enabled`: No | Yes; native Kilo tool names | No |
