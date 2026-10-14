@@ -11,6 +11,10 @@ ATTRIBUTIONS-*.md @nvidia/nemo-fabric-dep-approvers
 /docs/ @nvidia/nemo-fabric-doc-approvers @nvidia/nemo-fabric-reviewers
 /docs/reference/api/ @nvidia/nemo-fabric-reviewers
 
+# Request product and code review for the main README and ecosystem page.
+/README.md @nvidia/nemo-fabric-product @nvidia/nemo-fabric-reviewers
+/docs/about-nemo-fabric/ecosystem.mdx @nvidia/nemo-fabric-product @nvidia/nemo-fabric-reviewers
+
 # Repository access policy requires Fabric maintainer or admin review.
 /.github/CODEOWNERS @nvidia/nemo-fabric-maintainers @nvidia/nemo-fabric-admins
 /CONTRIBUTING.md @nvidia/nemo-fabric-maintainers @nvidia/nemo-fabric-admins
