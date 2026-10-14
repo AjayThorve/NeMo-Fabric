@@ -326,6 +326,11 @@ complete the following steps, then rerun the PR check.
    settings; public `npm view` and CI cannot verify this private configuration. Require package 2FA and disallow
    token publication in npm settings. Remove or revoke local bootstrap credentials
    after administration is complete.
+   Recheck trust immediately before release: npm expires unvalidated
+   configurations after 48 hours without a successful publish. If bootstrap
+   happened earlier, an npm maintainer may need to recreate expired trust near
+   release; do not manually publish a supported version to validate it. See
+   [npm's trust expiry announcement](https://github.blog/changelog/2026-10-02-unvalidated-npm-trusted-publishing-configurations-now-expire/).
 5. Cut the canonical release tag and approve the `npmjs` environment. Supported
    versions are published through GitHub OIDC. Confirm release provenance on npm.
    If a release job already failed because bootstrap or trust settings were missing,
