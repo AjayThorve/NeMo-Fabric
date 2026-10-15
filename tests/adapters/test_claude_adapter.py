@@ -196,6 +196,14 @@ def test_claude_descriptor_is_narrow_and_versioned():
                         "one invocation."
                     ),
                 },
+                "max_buffer_size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Size limit the Claude Agent SDK applies to one JSON "
+                        "message from Claude Code. Omit to use the SDK default."
+                    ),
+                },
                 "permission_mode": {
                     "type": "string",
                     "enum": [
@@ -264,6 +272,7 @@ def claude_payload_fixture(tmp_path, deadline_millis) -> dict[str, Any]:
                 "settings": {
                     "permission_mode": "dontAsk",
                     "max_budget_usd": 1.5,
+                    "max_buffer_size": 33554432,
                     "setting_sources": [],
                 },
             },
@@ -347,6 +356,7 @@ def test_build_options_maps_normalized_capabilities_and_claude_settings(claude_p
     assert options.permission_mode == "dontAsk"
     assert options.max_turns == 4
     assert options.max_budget_usd == 1.5
+    assert options.max_buffer_size == 33554432
     assert options.setting_sources == []
     assert options.skills == "all"
     assert len(options.plugins) == 1
@@ -396,6 +406,12 @@ def test_build_options_appends_to_claude_preset_system_prompt(claude_payload):
         "preset": "claude_code",
         "append": "Review carefully.",
     }
+
+
+def test_build_options_keeps_sdk_buffer_default_when_omitted(claude_payload):
+    del claude_payload["config"]["harness"]["settings"]["max_buffer_size"]
+
+    assert build_options(claude_payload).max_buffer_size is None
 
 
 @pytest.mark.parametrize(

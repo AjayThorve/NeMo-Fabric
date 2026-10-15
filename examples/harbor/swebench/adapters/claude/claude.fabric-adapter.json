@@ -48,6 +48,11 @@
         "exclusiveMinimum": 0,
         "description": "Maximum amount in US dollars that Claude may spend during one invocation."
       },
+      "max_buffer_size": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Size limit the Claude Agent SDK applies to one JSON message from Claude Code. Omit to use the SDK default."
+      },
       "permission_mode": {
         "type": "string",
         "enum": [

@@ -698,6 +698,7 @@ def build_options(
             permission_mode=permission_mode,
             max_turns=max_turns,
             max_budget_usd=max_budget,
+            max_buffer_size=settings.get("max_buffer_size"),
             setting_sources=sources,
             cli_path=_resolve_path(base_dir, cli_path) if cli_path else None,
             mcp_servers=mcp.config_path if mcp is not None else {},
