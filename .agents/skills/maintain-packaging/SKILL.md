@@ -143,8 +143,10 @@ compatibility decisions using the distribution and linkage context.
 ## New Public npm Packages
 
 Run `python3 scripts/ci/check_npm_bootstrap.py` when introducing a public npm
-package. Publication and the check discover the contract and public adapter
-workspaces from manifests; add the adapter to the npm workspace. Complete the
+package. The check discovers the contract and public adapter workspaces from
+manifests; add the adapter to the npm workspace. Separately wire it into release
+version stamping, build/test coverage, and the publication list before enabling
+uploads. Discovery alone does not enable publication. Complete the
 npm maintainer bootstrap and authenticated trusted-publisher readback in
 [`RELEASING.md`](../../../RELEASING.md#bootstrap-npm-trusted-publishing) before
 release. Public existence alone cannot verify trusted publishing. If the PR

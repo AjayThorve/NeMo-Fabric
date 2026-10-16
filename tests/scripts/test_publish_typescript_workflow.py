@@ -90,8 +90,21 @@ def test_publisher_publishes_packages_in_dependency_order():
         == "python3 scripts/ci/check_npm_bootstrap.py"
     )
     run = steps["Publish packages"]["run"]
-    assert "check_npm_bootstrap.py --list-directories" in run
-    assert 'done < "$RUNNER_TEMP/npm-packages.txt"' in run
+    # Discovery checks future workspaces but must not expand upload coverage
+    # beyond the existing release versioning and build/test enumerations.
+    assert "--list-directories" not in run
+    directories = (
+        "adapter-contract/typescript",
+        "adapters/typescript/common",
+        "adapters/typescript/cline",
+        "adapters/typescript/droid",
+        "adapters/typescript/pi",
+        "adapters/typescript/opencode",
+        "adapters/typescript/qwen",
+        "adapters/typescript/kilo",
+    )
+    positions = [run.index(directory) for directory in directories]
+    assert positions == sorted(positions)
     assert "--action publish" in run
 
 

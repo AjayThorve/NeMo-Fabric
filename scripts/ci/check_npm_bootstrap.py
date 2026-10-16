@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Discover publication order and check public package existence without credentials."""
+"""Discover public npm packages and check registry existence without credentials."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ REGISTRY = "https://registry.npmjs.org"
 
 
 def package_directories(root: Path) -> list[Path]:
-    """Use the contract and adapter workspace manifests as the publication source."""
+    """List public manifest packages with internal runtime dependencies first."""
     workspace = root / "adapters/typescript"
     patterns = json.loads((workspace / "package.json").read_text())["workspaces"]
     candidates = [root / "adapter-contract/typescript"]
@@ -53,7 +53,14 @@ def package_directories(root: Path) -> list[Path]:
         ready = [
             name
             for name, (_, manifest) in pending.items()
-            if not (set(manifest.get("dependencies", {})) & pending.keys())
+            if not (
+                (
+                    set(manifest.get("dependencies", {}))
+                    | set(manifest.get("peerDependencies", {}))
+                    | set(manifest.get("optionalDependencies", {}))
+                )
+                & pending.keys()
+            )
         ]
         if not ready:
             raise ValueError(f"Public npm dependency cycle: {', '.join(pending)}")
@@ -65,6 +72,7 @@ def package_directories(root: Path) -> list[Path]:
 
 
 def check_packages(directories: list[Path], *, open_url=urlopen) -> None:
+    """Check every package, distinguishing absence from inconclusive lookups."""
     errors = []
     for directory in directories:
         name = json.loads((directory / "package.json").read_text())["name"]
@@ -98,6 +106,7 @@ def check_packages(directories: list[Path], *, open_url=urlopen) -> None:
 
 
 def main() -> None:
+    """List discovered packages or verify their public registry existence."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list-directories", action="store_true")
     args = parser.parse_args()

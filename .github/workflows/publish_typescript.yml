@@ -148,11 +148,19 @@ jobs:
           RELEASE_DIST_TAG: ${{ steps.release.outputs.dist_tag }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/check_npm_bootstrap.py --list-directories > "$RUNNER_TEMP/npm-packages.txt"
-          while IFS= read -r package_directory; do
+          # Keep publication aligned with the explicit versioning/build coverage.
+          for package_directory in \
+            adapter-contract/typescript \
+            adapters/typescript/common \
+            adapters/typescript/cline \
+            adapters/typescript/droid \
+            adapters/typescript/pi \
+            adapters/typescript/opencode \
+            adapters/typescript/qwen \
+            adapters/typescript/kilo; do
             python3 scripts/ci/publish_typescript_package.py \
               --action publish \
               --package-directory "$package_directory" \
               --version "$RELEASE_VERSION" \
               --dist-tag "$RELEASE_DIST_TAG"
-          done < "$RUNNER_TEMP/npm-packages.txt"
+          done

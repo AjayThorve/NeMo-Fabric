@@ -272,7 +272,7 @@ the release workflow checks every package before uploading any package. HTTP 404
 means the package is absent. Other HTTP or network failures mean the check could
 not establish existence and must be investigated or retried.
 
-List the current publication set from the contract and adapter workspace manifests
+List public packages from the contract and adapter workspace manifests
 (no static package-name list):
 
 ```bash
@@ -280,9 +280,13 @@ python3 scripts/ci/check_npm_bootstrap.py --list-directories
 python3 scripts/ci/check_npm_bootstrap.py
 ```
 
-Publication uses this same discovery in dependency order, skipping private
-workspaces. A successful check proves public existence only, not ownership,
-trusted-publisher settings, or the presence of a proposed release version.
+The bootstrap check discovers future public workspaces automatically and skips
+private workspaces. Publication retains its explicit package list, aligned with
+release version stamping and build/test coverage. When adding a package, update
+all three surfaces before enabling its publication. The discovered directory list
+is informational; it does not select uploads. A successful check proves public
+existence only, not ownership, trusted-publisher settings, or the presence of a
+proposed release version.
 Contributors without npm permissions should ask an NVIDIA npm maintainer to
 complete the following steps, then rerun the PR check.
 

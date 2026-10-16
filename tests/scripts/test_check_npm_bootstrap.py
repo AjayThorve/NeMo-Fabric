@@ -66,6 +66,44 @@ def test_discovery_cycle_fails(tmp_path):
         bootstrap.package_directories(tmp_path)
 
 
+@pytest.mark.parametrize(
+    "dependency_field", ["peerDependencies", "optionalDependencies"]
+)
+def test_discovery_orders_internal_peer_and_optional_dependencies(
+    tmp_path, dependency_field
+):
+    manifest(tmp_path, "adapter-contract/typescript", name="contract")
+    manifest(tmp_path, "adapters/typescript", workspaces=["*"])
+    consumer = manifest(
+        tmp_path,
+        "adapters/typescript/a-consumer",
+        name="consumer",
+        **{dependency_field: {"provider": "1", "external": "1"}},
+    )
+    provider = manifest(tmp_path, "adapters/typescript/z-provider", name="provider")
+    assert bootstrap.package_directories(tmp_path) == [
+        tmp_path / "adapter-contract/typescript",
+        provider,
+        consumer,
+    ]
+
+
+def test_discovery_unmatched_workspace_fails(tmp_path):
+    manifest(tmp_path, "adapter-contract/typescript", name="contract")
+    manifest(tmp_path, "adapters/typescript", workspaces=["missing-*"])
+    with pytest.raises(ValueError, match="Workspace pattern has no matches: missing-"):
+        bootstrap.package_directories(tmp_path)
+
+
+def test_discovery_duplicate_public_name_fails(tmp_path):
+    manifest(tmp_path, "adapter-contract/typescript", name="contract")
+    manifest(tmp_path, "adapters/typescript", workspaces=["*"])
+    manifest(tmp_path, "adapters/typescript/first", name="duplicate")
+    manifest(tmp_path, "adapters/typescript/second", name="duplicate")
+    with pytest.raises(ValueError, match="Duplicate public package name: duplicate"):
+        bootstrap.package_directories(tmp_path)
+
+
 @pytest.mark.parametrize("code", [401, 403, 429, 500, 503])
 def test_http_failure_is_not_missing_package(tmp_path, code):
     directory = manifest(tmp_path, "pkg", name="pkg")
