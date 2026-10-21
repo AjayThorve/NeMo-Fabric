@@ -33,6 +33,7 @@ use crate::config::{
 use crate::environment::resolve_environment_provider;
 use crate::error::{FabricError, Result};
 use crate::resource_snapshot::{LocalHostProcess, RuntimeResourceSnapshot, snapshot_local_host};
+use crate::system_stats::{InvocationSystemStats, ResourceObservation};
 
 mod openshell;
 use openshell::OpenShellRuntimeAdapter;
@@ -149,6 +150,10 @@ pub struct RunResult {
     /// result. Absent when the runtime's resources could not be observed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_snapshot: Option<RuntimeResourceSnapshot>,
+    /// Invocation duration and endpoint observations from the executing runner.
+    /// Absent in older results and when an execution backend does not collect them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_stats: Option<InvocationSystemStats>,
     /// Artifacts produced or collected by this run.
     #[serde(default)]
     pub artifacts: ArtifactManifest,
@@ -2034,19 +2039,27 @@ fn run_local_host_invocation_with_timeout(
             }
         };
         let fabric_invocation = write_fabric_invocation(&fabric_home, &adapter_payload)?;
-        match exchange_lifecycle_message(
+        let before = ResourceObservation::from_result(local_runtime_resource_snapshot(runtime));
+        let invocation_started = Instant::now();
+        let exchange = exchange_lifecycle_message(
             &mut host_guard,
             &runtime.runtime_id,
             &lifecycle_request,
             invoke_timeout,
-        ) {
+        );
+        let elapsed_seconds = invocation_started.elapsed().as_secs_f64();
+        match exchange {
             Ok(output) => {
+                // Both observations stay under the host lock to exclude other invocations.
+                let after =
+                    ResourceObservation::from_result(local_runtime_resource_snapshot(runtime));
+                let system_stats = InvocationSystemStats::new(before, after, elapsed_seconds);
+                let resource_snapshot = system_stats.after.snapshot().cloned();
                 let stderr = take_local_host_stderr(&mut host_guard);
-                // Read while the host lock is held, so no later invocation is counted.
-                let resource_snapshot = local_runtime_resource_snapshot(runtime).ok();
                 Ok((
                     output,
                     resource_snapshot,
+                    system_stats,
                     stderr,
                     host_guard.command.clone(),
                     host_guard.child.id(),
@@ -2070,6 +2083,7 @@ fn run_local_host_invocation_with_timeout(
     let (
         adapter_output,
         resource_snapshot,
+        system_stats,
         stderr,
         host_command,
         host_pid,
@@ -2222,6 +2236,7 @@ fn run_local_host_invocation_with_timeout(
         error,
         usage: agent_result.usage.as_ref().map(run_usage),
         resource_snapshot,
+        system_stats: Some(system_stats),
         artifacts,
         telemetry: telemetry_ref(plan, relay_config.as_ref())
             .into_iter()
@@ -4470,6 +4485,7 @@ for line in sys.stdin:
             error: None,
             usage: None,
             resource_snapshot: None,
+            system_stats: None,
             artifacts: ArtifactManifest::default(),
             telemetry: vec![
                 TelemetryRef {
@@ -5040,6 +5056,77 @@ for line in sys.stdin:
             snapshot.cpu_time_seconds >= 1.0,
             "descendant CPU missing: {snapshot:?}"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn invocation_stats_isolate_concurrent_work_on_a_warm_runtime() {
+        let (root, plan) = local_host_plan("busy");
+        let runtime = start_runtime(&plan).expect("start local host");
+        let wall_started = Instant::now();
+        let mut results = thread::scope(|scope| {
+            let first = scope.spawn(|| invoke_runtime(&plan, &runtime, RunRequest::text("one")));
+            let second = scope.spawn(|| invoke_runtime(&plan, &runtime, RunRequest::text("two")));
+            vec![
+                first.join().unwrap().unwrap(),
+                second.join().unwrap().unwrap(),
+            ]
+        });
+        let wall_elapsed = wall_started.elapsed().as_secs_f64();
+        stop_runtime(&plan, &runtime).expect("stop local host");
+        results.sort_by_key(|result| result.output["invocation_count"].as_u64().unwrap());
+        let first = results[0].system_stats.as_ref().expect("first stats");
+        let second = results[1].system_stats.as_ref().expect("second stats");
+        for result in &results {
+            let stats = result.system_stats.as_ref().unwrap();
+            assert!(stats.elapsed_seconds > 0.0);
+            let cpu = stats.cpu_time_seconds_estimate.expect("CPU estimate");
+            assert!(cpu >= 1.0, "waited child CPU missing: {stats:?}");
+            assert_eq!(stats.after.snapshot(), result.resource_snapshot.as_ref());
+        }
+        assert!(
+            second.before.snapshot().unwrap().cpu_time_seconds
+                >= first.after.snapshot().unwrap().cpu_time_seconds
+        );
+        assert!(
+            second.cpu_time_seconds_estimate.unwrap()
+                < second.after.snapshot().unwrap().cpu_time_seconds - 0.9,
+            "second estimate includes previous invocation's CPU"
+        );
+        assert!(
+            first.elapsed_seconds + second.elapsed_seconds <= wall_elapsed,
+            "elapsed measurements include time queued behind another invocation"
+        );
+        assert_ne!(results[0].invocation_id, results[1].invocation_id);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn observation_failure_preserves_invocation_result() {
+        let (root, plan) = local_host_plan("adapter_reported_failure");
+        let runtime = start_runtime(&plan).expect("start local host");
+        // Make observation unavailable without breaking the live adapter protocol.
+        local_host_processes().remove(&runtime.runtime_id);
+        let result = invoke_runtime(&plan, &runtime, RunRequest::text("fail"))
+            .expect("normalized adapter failure still returns a result");
+        stop_runtime(&plan, &runtime).expect("stop local host");
+        assert_eq!(result.status, RunStatus::Failed);
+        assert_eq!(result.error.unwrap().code, "fake_adapter_failure");
+        assert!(result.resource_snapshot.is_none());
+        let stats = result.system_stats.expect("duration and availability");
+        assert!(stats.elapsed_seconds > 0.0);
+        assert!(stats.cpu_time_seconds_estimate.is_none());
+        for observation in [&stats.before, &stats.after] {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            assert!(
+                matches!(observation, ResourceObservation::Unavailable { reason } if !reason.is_empty())
+            );
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            assert!(
+                matches!(observation, ResourceObservation::Unsupported { reason } if !reason.is_empty())
+            );
+        }
         let _ = fs::remove_dir_all(root);
     }
 

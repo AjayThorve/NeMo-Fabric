@@ -1436,6 +1436,7 @@ Memory, process count, and CPU time cover the adapter host process and its live 
  - <b>`cpu_time_seconds`</b>:  CPU time used since the adapter host started,  including exited descendants. It can drop when a descendant  leaves the tree.
 
 
+
 ### Fields
 
 The mapping exposes the following typed fields:
@@ -1470,6 +1471,7 @@ Return an immutable view of preserved extension fields.
 
 ---
 
+
 ### <kbd>classmethod</kbd> `from_mapping`
 
 ```python
@@ -1479,6 +1481,7 @@ def from_mapping(mapping: Mapping[str, Any]) -> Self
 Validate and copy a mapping into the requested typed model.
 
 ---
+
 
 ### <kbd>method</kbd> `to_dict`
 
@@ -1490,6 +1493,7 @@ Return the same detached representation as ``to_mapping()``.
 
 ---
 
+
 ### <kbd>method</kbd> `to_mapping`
 
 ```python
@@ -1500,6 +1504,186 @@ Return a detached, JSON-compatible mapping for serialization.
 
 
 ---
+
+
+## <kbd>class</kbd> `ResourceObservation`
+
+Adapter host process-tree reading, or an explicit collection failure.
+
+
+
+**Attributes:**
+
+ - <b>`status`</b>:  ``available``, ``unavailable``, or ``unsupported``.
+ - <b>`snapshot`</b>:  Present only when available; a ``RuntimeResourceSnapshot``.
+ - <b>`reason`</b>:  Present only when unavailable or unsupported.
+
+
+
+### Fields
+
+The mapping exposes the following typed fields:
+
+| Field | Type |
+| --- | --- |
+| `status` | `str` |
+
+### <kbd>method</kbd> `__init__`
+
+```python
+def __init__(mapping: Mapping[str, Any]) -> None
+```
+
+
+
+
+
+
+---
+
+### <kbd>property</kbd> extra_fields
+
+Return an immutable view of preserved extension fields.
+
+---
+
+### <kbd>property</kbd> reason
+
+Return the collection failure reason, otherwise None.
+
+---
+
+### <kbd>property</kbd> snapshot
+
+Return the reading when available, otherwise None.
+
+
+
+---
+
+
+### <kbd>classmethod</kbd> `from_mapping`
+
+```python
+def from_mapping(mapping: Mapping[str, Any]) -> Self
+```
+
+Validate and copy a mapping into the requested typed model.
+
+---
+
+
+### <kbd>method</kbd> `to_dict`
+
+```python
+def to_dict() -> dict[str, Any]
+```
+
+Return the same detached representation as ``to_mapping()``.
+
+---
+
+
+### <kbd>method</kbd> `to_mapping`
+
+```python
+def to_mapping() -> dict[str, Any]
+```
+
+Return a detached, JSON-compatible mapping for serialization.
+
+
+---
+
+
+## <kbd>class</kbd> `InvocationSystemStats`
+
+System measurements for one invocation in its executing runner.
+
+Observations cover the adapter host process tree, excluding the orchestrator and remote services. Endpoints are neither peaks nor time averages.
+
+
+
+**Attributes:**
+
+ - <b>`elapsed_seconds`</b>:  Monotonic adapter exchange duration, excluding startup,  endpoint collection, artifact preparation, and teardown.
+ - <b>`before`</b>:  Observation immediately before the adapter exchange.
+ - <b>`after`</b>:  Observation immediately after the exchange, under the same lock.
+ - <b>`cpu_time_seconds_estimate`</b>:  Nonnegative CPU counter difference, or None  if an endpoint is missing, identities differ, or the counter fell.  Process reaping and reparenting can make this underestimate work.
+
+
+
+### Fields
+
+The mapping exposes the following typed fields:
+
+| Field | Type |
+| --- | --- |
+| `elapsed_seconds` | `float` |
+| `before` | `ResourceObservation` |
+| `after` | `ResourceObservation` |
+
+### <kbd>method</kbd> `__init__`
+
+```python
+def __init__(mapping: Mapping[str, Any]) -> None
+```
+
+
+
+
+
+
+---
+
+### <kbd>property</kbd> cpu_time_seconds_estimate
+
+Return the CPU counter difference estimate, or None when unknown.
+
+---
+
+### <kbd>property</kbd> extra_fields
+
+Return an immutable view of preserved extension fields.
+
+
+
+---
+
+
+### <kbd>classmethod</kbd> `from_mapping`
+
+```python
+def from_mapping(mapping: Mapping[str, Any]) -> Self
+```
+
+Validate and copy a mapping into the requested typed model.
+
+---
+
+
+### <kbd>method</kbd> `to_dict`
+
+```python
+def to_dict() -> dict[str, Any]
+```
+
+Return the same detached representation as ``to_mapping()``.
+
+---
+
+
+### <kbd>method</kbd> `to_mapping`
+
+```python
+def to_mapping() -> dict[str, Any]
+```
+
+Return a detached, JSON-compatible mapping for serialization.
+
+
+---
+
 
 ## <kbd>class</kbd> `RunResult`
 
@@ -1523,6 +1707,7 @@ The model is both attribute-accessible and mapping-compatible. A harness failure
  - <b>`error`</b>:  Structured failure, or ``None`` on success.
  - <b>`usage`</b>:  Normalized invocation usage, or ``None`` when unavailable.
  - <b>`resource_snapshot`</b>:  Runtime resource snapshot read once after the  adapter returned this result, or ``None`` when the runtime's  resources could not be observed.
+ - <b>`system_stats`</b>:  Invocation duration and endpoint observations, or None  for older results or execution backends without collection.
  - <b>`artifacts`</b>:  Normalized artifact manifest.
  - <b>`telemetry`</b>:  Ordered telemetry references.
  - <b>`events`</b>:  Ordered lifecycle and invocation events.
@@ -1547,6 +1732,7 @@ The mapping exposes the following typed fields:
 | `output` | `RunOutput \| JSONValue` |
 | `error` | `ErrorInfo \| None` |
 | `usage` | `RunUsage \| None` |
+| `system_stats` | `InvocationSystemStats \| None` |
 | `resource_snapshot` | `RuntimeResourceSnapshot \| None` |
 | `artifacts` | `ArtifactManifest` |
 | `telemetry` | `Sequence[TelemetryRef]` |

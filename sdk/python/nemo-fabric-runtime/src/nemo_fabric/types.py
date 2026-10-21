@@ -2053,6 +2053,95 @@ class RuntimeResourceSnapshot(FabricMapping):
         return data
 
 
+class ResourceObservation(FabricMapping):
+    """Adapter host process-tree reading, or an explicit collection failure.
+
+    Attributes:
+        status: ``available``, ``unavailable``, or ``unsupported``.
+        snapshot: Present only when available; a ``RuntimeResourceSnapshot``.
+        reason: Present only when unavailable or unsupported.
+    """
+
+    status: str
+    _fields = frozenset({"status", "snapshot", "reason"})
+
+    @property
+    def snapshot(self) -> RuntimeResourceSnapshot | None:
+        """Return the reading when available, otherwise None."""
+        return self._data.get("snapshot")
+
+    @property
+    def reason(self) -> str | None:
+        """Return the collection failure reason, otherwise None."""
+        return self._data.get("reason")
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        status = data.get("status")
+        if status == "available":
+            if "reason" in data:
+                raise FabricConfigError("available observation cannot contain reason")
+            data["snapshot"] = RuntimeResourceSnapshot.from_mapping(
+                data.get("snapshot")
+            )
+        elif status in ("unavailable", "unsupported"):
+            if "snapshot" in data:
+                raise FabricConfigError("missing observation cannot contain snapshot")
+            data["reason"] = _required_text(data.get("reason"), "observation reason")
+        else:
+            raise FabricConfigError(
+                "observation status must be available, unavailable, or unsupported"
+            )
+        return data
+
+
+class InvocationSystemStats(FabricMapping):
+    """System measurements for one invocation in its executing runner.
+
+    Observations cover the adapter host process tree, excluding the orchestrator
+    and remote services. Endpoints are neither peaks nor time averages.
+
+    Attributes:
+        elapsed_seconds: Monotonic adapter exchange duration, excluding startup,
+            endpoint collection, artifact preparation, and teardown.
+        before: Observation immediately before the adapter exchange.
+        after: Observation immediately after the exchange, under the same lock.
+        cpu_time_seconds_estimate: Nonnegative CPU counter difference, or None
+            if an endpoint is missing, identities differ, or the counter fell.
+            Process reaping and reparenting can make this underestimate work.
+    """
+
+    elapsed_seconds: float
+    before: ResourceObservation
+    after: ResourceObservation
+    _fields = frozenset(
+        {"elapsed_seconds", "before", "after", "cpu_time_seconds_estimate"}
+    )
+
+    @property
+    def cpu_time_seconds_estimate(self) -> float | None:
+        """Return the CPU counter difference estimate, or None when unknown."""
+        return self._data.get("cpu_time_seconds_estimate")
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        data["before"] = ResourceObservation.from_mapping(data.get("before"))
+        data["after"] = ResourceObservation.from_mapping(data.get("after"))
+        for field in ("elapsed_seconds", "cpu_time_seconds_estimate"):
+            value = data.get(field)
+            if value is None and field == "cpu_time_seconds_estimate":
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise FabricConfigError(f"{field} must be a finite nonnegative number")
+            data[field] = float(value)
+        return data
+
+
 class RunResult(FabricMapping):
     """Normalized terminal result from one NeMo Fabric invocation.
 
@@ -2076,6 +2165,8 @@ class RunResult(FabricMapping):
         resource_snapshot: Runtime resource snapshot read once after the
             adapter returned this result, or ``None`` when the runtime's
             resources could not be observed.
+        system_stats: Invocation duration and endpoint observations, or None
+            for older results or execution backends without collection.
         artifacts: Normalized artifact manifest.
         telemetry: Ordered telemetry references.
         events: Ordered lifecycle and invocation events.
@@ -2093,6 +2184,7 @@ class RunResult(FabricMapping):
     output: RunOutput | JSONValue
     error: ErrorInfo | None
     usage: RunUsage | None
+    system_stats: InvocationSystemStats | None
     resource_snapshot: RuntimeResourceSnapshot | None
     artifacts: ArtifactManifest
     telemetry: Sequence[TelemetryRef]
@@ -2112,6 +2204,7 @@ class RunResult(FabricMapping):
             "error",
             "usage",
             "resource_snapshot",
+            "system_stats",
             "artifacts",
             "telemetry",
             "events",
@@ -2137,6 +2230,11 @@ class RunResult(FabricMapping):
         )
         data["usage"] = (
             None if data.get("usage") is None else RunUsage.from_mapping(data["usage"])
+        )
+        data["system_stats"] = (
+            None
+            if data.get("system_stats") is None
+            else InvocationSystemStats.from_mapping(data["system_stats"])
         )
         data["resource_snapshot"] = (
             None

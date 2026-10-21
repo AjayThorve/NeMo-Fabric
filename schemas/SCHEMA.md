@@ -169,3 +169,7 @@ just generate-typescript-contract
 
 Run `just test-typescript` to check generated-file drift, strict compile-time
 fixtures, package contents, and clean-consumer imports.
+
+### Invocation System Measurements
+
+`system_stats` in `sdk/run-result` contains a monotonic adapter exchange duration, before/after observations of the executing adapter host process tree, and an optional CPU counter difference estimate. Its `ResourceObservation` definition is tagged by `status`: `available` carries a snapshot; `unavailable` and `unsupported` carry a reason. Endpoint memory is not peak memory. A missing estimate is unknown, not zero. The compatible `resource_snapshot` field repeats the final available snapshot. These northbound additions do not change the adapter result contract.

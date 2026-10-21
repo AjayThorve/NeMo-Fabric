@@ -13,6 +13,7 @@ pub mod error;
 pub mod resource_snapshot;
 pub mod runtime;
 pub mod schema;
+pub mod system_stats;
 mod task_command;
 mod time;
 
@@ -58,6 +59,7 @@ pub use runtime::{
 pub use schema::{
     SchemaName, generate_all_schemas, generate_schema, generate_schema_json, write_schema_snapshots,
 };
+pub use system_stats::{InvocationSystemStats, ResourceObservation};
 
 /// Returns the crate version compiled into this build.
 pub fn version() -> &'static str {

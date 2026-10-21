@@ -17,6 +17,7 @@ Every invocation that reaches the adapter boundary returns a normalized
 | `error` | Structured failure metadata when available. Branch on `status`, not on this field. |
 | `output` | Harness output normalized to the configured output schema. |
 | `usage` | Optional `RunUsage` with invocation-local input, cached-input, output, and total token counts, reported cost in USD, and provider metadata. |
+| `system_stats` | Optional `InvocationSystemStats`: adapter exchange duration, before/after process-tree observations, and an optional CPU counter difference estimate. |
 | `resource_snapshot` | Optional `RuntimeResourceSnapshot` of the runtime, read once after the adapter returned the result. `None` when the read failed. |
 | `artifacts` | Output files, logs, patches, and other materialized references. |
 | `telemetry` | References to NVIDIA NeMo Relay or other telemetry streams from the run. |
@@ -49,16 +50,9 @@ Treat missing counters and cost as unknown, not zero. `cached_input_tokens` repo
 
 ## Runtime Resource Snapshots
 
-`await runtime.resource_snapshot()` returns a `RuntimeResourceSnapshot` with
-`runtime_id`, `started_at` and `observed_at` (RFC 3339 UTC),
-`resident_memory_bytes`, `process_count`, and `cpu_time_seconds`. It covers the
-local adapter host process and its descendants (not a shared service process),
-and it does not wait for an active invocation. CPU time is cumulative since the
-host started, so subtract an earlier snapshot to estimate one invocation; it
-can drop when a descendant leaves the tree, so treat a negative difference as
-unknown. Values that cannot be read raise an error, never read as zero.
-Snapshots observe only; enforce limits in the operating system or execution
-environment.
+`await runtime.resource_snapshot()` returns a `RuntimeResourceSnapshot` of the local adapter host and its descendants. `RunResult.system_stats` brackets each invocation under its host lock: `before` and `after` have `status="available"` plus a typed `snapshot`, or `status="unavailable"` / `"unsupported"` plus `reason`. A failed read preserves the adapter outcome. `elapsed_seconds` uses a monotonic clock around the adapter exchange and excludes startup, endpoint collection, artifact preparation, and teardown. Older results and backends without collection have `system_stats=None`.
+
+`cpu_time_seconds_estimate` subtracts the baseline CPU counter from the final counter, excluding previous invocations on a warm runtime. It is absent if an endpoint is missing, identities differ, or the counter decreases. Reaping, reparenting, and background work in the same tree can distort a positive estimate too. Endpoint memory and process counts are instantaneous, not peaks or averages. The compatible `resource_snapshot` field repeats the final available reading. Collection runs where the adapter executes, including inside a Harbor task runner, and requires no Relay collector or additional identity/artifact file. Protocol failures without a normalized result still raise without a partial `RunResult`. Enforce limits in the operating system or execution environment.
 
 ## Correlation IDs
 

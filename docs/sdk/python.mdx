@@ -786,13 +786,64 @@ as another user. On a kernel without children lists, every snapshot is
 unavailable under those mount options, because hidden processes are missing
 from the process table that the snapshot reads to find the tree.
 
-Each `RunResult` from a local runtime also carries `resource_snapshot`, read
-once after the adapter returned the result. It is `None` when the read failed;
-a failed read never fails the invocation. To estimate one invocation's CPU time,
-take a snapshot before it and subtract its `cpu_time_seconds` from the
-result's snapshot. CPU time can drop when a descendant is reparented out of the
-tree, so treat a difference as an estimate and a negative difference as
-unknown.
+Each `RunResult` from a local runtime carries `system_stats` with before/after observations and a monotonic duration for the adapter exchange. Both observations run under the invocation lock, so queued invocations cannot contaminate the baseline. Runtime startup, resource collection, artifact preparation, and teardown are excluded from `elapsed_seconds`. The existing `resource_snapshot` field contains the same final reading as `system_stats.after.snapshot`, or `None` if unavailable.
+
+### Invocation System Stats
+
+**Identical configs can produce different amounts of agent work and encounter different system conditions. Stats should help separate those two.**
+
+```python
+result = await runtime.invoke(input="Fix the failing test")
+stats = result.system_stats
+if stats is not None:
+    print(stats.elapsed_seconds, stats.cpu_time_seconds_estimate)
+    if stats.after.status == "available":
+        print(stats.after.snapshot.resident_memory_bytes)
+    else:
+        print(stats.after.status, stats.after.reason)
+```
+
+For example, a serialized `RunResult` contains this fragment. The IDs already associate the measurements with one invocation; no additional identity file is required.
+
+```json
+{
+  "runtime_id": "runtime-1",
+  "invocation_id": "invocation-2",
+  "request_id": "trial-42",
+  "system_stats": {
+    "elapsed_seconds": 8.0,
+    "before": {
+      "status": "available",
+      "snapshot": {
+        "runtime_id": "runtime-1",
+        "started_at": "2026-10-21T09:00:00.000Z",
+        "observed_at": "2026-10-21T09:01:00.000Z",
+        "resident_memory_bytes": 52428800,
+        "process_count": 1,
+        "cpu_time_seconds": 12.0
+      }
+    },
+    "after": {
+      "status": "available",
+      "snapshot": {
+        "runtime_id": "runtime-1",
+        "started_at": "2026-10-21T09:00:00.000Z",
+        "observed_at": "2026-10-21T09:01:08.000Z",
+        "resident_memory_bytes": 83886080,
+        "process_count": 1,
+        "cpu_time_seconds": 14.5
+      }
+    },
+    "cpu_time_seconds_estimate": 2.5
+  }
+}
+```
+
+The CPU estimate is 2.5 seconds for this invocation, excluding the warm runtime's previous 12 seconds. It is omitted when either reading is missing, runtime identities differ, or the counter decreases. Process reaping and reparenting can distort even a positive difference; this is an estimate, not exact accounting. Background work in the same process tree also contributes; the difference does not isolate agent-only CPU. Endpoint memory and process counts are instantaneous gauges, not peaks, averages, or invocation allocations.
+
+For Harbor, these measurements come from the adapter host inside the task runner, even when a separate host selects the task and capabilities. Harbor's existing result JSON carries the new field without a new stats file. For a model team comparing identical configs, pair `usage` with these measurements: more tokens or tool calls can explain more agent work; similar work with longer elapsed time warrants investigating execution conditions. These endpoint observations alone cannot diagnose CPU contention, throttling, remote inference latency, or memory peaks.
+
+A failed read appears as `{"status": "unavailable", "reason": "..."}`; an unsupported provider or operating system uses `"unsupported"`. Collection failures preserve the adapter outcome, including a normalized failed result. Older results and execution backends without collection have `system_stats=None`. Protocol failures and timeouts that raise without a `RunResult` still raise; they do not produce a partial stats artifact. These measurements require neither NeMo Relay collection nor invocation recording.
 
 Snapshots observe resources only. They do not enforce limits, stop runtimes, or
 queue requests. Use the operating system or execution environment, such as
@@ -1028,6 +1079,7 @@ Important fields:
 | `output` | Harness output normalized to the configured output schema. |
 | `error` | Structured failure metadata when available. |
 | `usage` | Optional `RunUsage` with invocation-local input, cached-input, output, and total token counts, reported cost in USD, and provider metadata. |
+| `system_stats` | Optional `InvocationSystemStats`: monotonic adapter exchange duration, before/after observations with availability, and an optional CPU counter difference estimate. |
 | `resource_snapshot` | Optional `RuntimeResourceSnapshot` of the runtime, read once after the adapter returned the result. |
 | `artifacts` | Output files, logs, patches, native artifacts, and other materialized references. |
 | `telemetry` | References to NeMo Relay or other telemetry streams produced by the run. |

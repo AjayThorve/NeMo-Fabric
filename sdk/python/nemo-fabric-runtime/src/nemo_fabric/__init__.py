@@ -63,6 +63,8 @@ from nemo_fabric.types import EnvironmentReference
 from nemo_fabric.types import FabricEvent
 from nemo_fabric.types import RunOutput
 from nemo_fabric.types import RunPlan
+from nemo_fabric.types import InvocationSystemStats
+from nemo_fabric.types import ResourceObservation
 from nemo_fabric.types import RunResult
 from nemo_fabric.types import RunUsage
 from nemo_fabric.types import RuntimeCapabilities
@@ -121,6 +123,8 @@ __all__ = [
     "RunOutput",
     "RunPlan",
     "RunRequest",
+    "InvocationSystemStats",
+    "ResourceObservation",
     "RunResult",
     "RunUsage",
     "RuntimeCapabilities",

@@ -71,6 +71,8 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`types.EnvironmentReference`](./nemo_fabric.types.md#class-environmentreference): Provider-specific identity for an existing execution environment.
 - [`types.ErrorInfo`](./nemo_fabric.types.md#class-errorinfo): Structured failure returned inside a normalized ``RunResult``.
 - [`types.FabricEvent`](./nemo_fabric.types.md#class-fabricevent): One normalized lifecycle or invocation event.
+- [`types.InvocationSystemStats`](./nemo_fabric.types.md#class-invocationsystemstats): System measurements for one invocation in its executing runner.
+- [`types.ResourceObservation`](./nemo_fabric.types.md#class-resourceobservation): Adapter host process-tree reading, or an explicit collection failure.
 - [`types.RunOutput`](./nemo_fabric.types.md#class-runoutput): Normalized adapter output.
 - [`types.RunPlan`](./nemo_fabric.types.md#class-runplan): Immutable execution plan produced before a runtime is started.
 - [`types.RunResult`](./nemo_fabric.types.md#class-runresult): Normalized terminal result from one NeMo Fabric invocation.

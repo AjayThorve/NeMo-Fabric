@@ -62,6 +62,7 @@ NeMo Fabric separates consumers from execution targets through a stable, version
 ## Documentation
 
 - [Quickstart](docs/getting-started/quickstart.mdx): Run a first agent through the Python SDK.
+- [Invocation system stats](docs/sdk/python.mdx#invocation-system-stats): Read adapter process-tree observations and elapsed time from each invocation result.
 - [Conversation telemetry](docs/sdk/python.mdx): Use `RunRequest.relay_session_root` to group Deep Agents and mini-SWE-agent turns under one NeMo Relay session.
 - [Installation](docs/getting-started/install.mdx): Install the runtime, adapters, harness dependencies, and telemetry components, and choose a deployment scenario.
 - [Adapter catalog](sdk/python/nemo-fabric-adapter-catalog/README.md): Inspect bundled adapter metadata on a host without installing harness SDKs.

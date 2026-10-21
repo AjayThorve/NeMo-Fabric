@@ -1,0 +1,21 @@
+---
+title: "Module system_stats"
+sidebar-title: "system_stats"
+slug: "/reference/api/rust-library-reference/nemo-fabric-core/system_stats"
+description: "Invocation measurements collected by Fabric in the executing runtime."
+position: 142
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+Generated from `cargo doc --no-deps -p nemo-fabric-core`.
+
+Invocation measurements collected by Fabric in the executing runtime.
+
+## Structs
+
+- [InvocationSystemStats](struct-invocationsystemstats.mdx): System measurements around one invocation, collected inside the executing runner. Resource observations cover its adapter host process tree, excluding the orchestrator, other workloads, and remote model/service processes.
+
+## Enums
+
+- [ResourceObservation](enum-resourceobservation.mdx): One attempt to observe the adapter host process tree. Missing readings are explicit; an unavailable observation never stands for zero resource usage.

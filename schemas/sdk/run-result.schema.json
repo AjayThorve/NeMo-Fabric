@@ -195,6 +195,99 @@
       ],
       "type": "object"
     },
+    "InvocationSystemStats": {
+      "description": "System measurements around one invocation, collected inside the executing\nrunner. Resource observations cover its adapter host process tree, excluding\nthe orchestrator, other workloads, and remote model/service processes.\n\nEndpoints are instantaneous readings, not peaks or time averages. CPU time\nis cumulative since runtime startup; its difference is only an estimate\nbecause process reaping and reparenting can change which work is visible.",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/ResourceObservation",
+          "description": "Observation immediately after the adapter exchange, before another\ninvocation can acquire this runtime's host lock."
+        },
+        "before": {
+          "$ref": "#/$defs/ResourceObservation",
+          "description": "Observation immediately before the adapter exchange."
+        },
+        "cpu_time_seconds_estimate": {
+          "description": "Nonnegative CPU counter difference, in seconds. Absent if an endpoint\nis missing, the runtime identity differs, or its CPU counter decreased.\nIt can undercount work whose processes leave the tree between reads.",
+          "format": "double",
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "elapsed_seconds": {
+          "description": "Monotonic elapsed seconds for the adapter exchange. Excludes runtime\nstartup, resource collection, artifact preparation, and teardown.",
+          "format": "double",
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "elapsed_seconds",
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ResourceObservation": {
+      "description": "One attempt to observe the adapter host process tree. Missing readings are\nexplicit; an unavailable observation never stands for zero resource usage.",
+      "oneOf": [
+        {
+          "description": "The process tree was read successfully.",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/RuntimeResourceSnapshot",
+              "description": "Timestamped cumulative counters and instantaneous gauges."
+            },
+            "status": {
+              "const": "available",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "snapshot"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The reader supports this runtime, but could not read its process tree.",
+          "properties": {
+            "reason": {
+              "description": "Why this observation could not be collected.",
+              "type": "string"
+            },
+            "status": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The runtime's provider or operating system has no reader.",
+          "properties": {
+            "reason": {
+              "description": "Which collection capability is missing.",
+              "type": "string"
+            },
+            "status": {
+              "const": "unsupported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RunStatus": {
       "description": "Runtime completion status.",
       "oneOf": [
@@ -450,6 +543,17 @@
     "status": {
       "$ref": "#/$defs/RunStatus",
       "description": "Runtime status."
+    },
+    "system_stats": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InvocationSystemStats"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Invocation duration and endpoint observations from the executing runner.\nAbsent in older results and when an execution backend does not collect them."
     },
     "telemetry": {
       "description": "Ordered telemetry references when available.",
