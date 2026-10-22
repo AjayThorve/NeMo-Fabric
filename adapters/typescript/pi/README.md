@@ -98,10 +98,10 @@ To select a specific Relay executable instead of relying on `PATH`, set
 FABRIC_NEMO_RELAY_COMMAND="/absolute/path/to/nemo-relay" uv run python your_app.py
 ```
 
-The adapter does not bundle the Relay Pi extension. Obtain the
-[`crates/cli/assets/pi-extension`](https://github.com/NVIDIA/NeMo-Relay/tree/0.10.0/crates/cli/assets/pi-extension)
-directory from the Relay release that matches the CLI and configure its path as described in the
-next section.
+The adapter does not bundle the Relay Pi extension. Check `nemo-relay --version`
+and open the [matching Relay release](https://github.com/NVIDIA/NeMo-Relay/releases).
+Extract `crates/cli/assets/pi-extension` from that release's source archive and
+configure its path as described in the next section.
 
 ## Configure the Adapter
 
@@ -300,12 +300,12 @@ the published production dependency graph.
 
 ## Credential-free HTTP model gateways
 
-For Relay-enabled runs, set `harness.settings.insecure_http_model_hosts` to the exact bare DNS hostnames or IP addresses of trusted inference gateways. This requires NeMo Relay CLI 0.11.0 or later; older supported CLIs remain compatible when the setting is omitted.
+For Relay-enabled runs, set `harness.settings.insecure_http_model_hosts` to the exact bare DNS hostnames or IP addresses of trusted inference gateways. This requires NeMo Relay CLI 0.11.x; older supported CLIs remain compatible when the setting is omitted.
 
 ```python
 config.harness.settings["insecure_http_model_hosts"] = ["inference.internal", "10.0.0.10"]
 ```
 
-Entries have no scheme, port, path, wildcard, brackets, or IPv6 zone identifier. DNS matching ignores case and a trailing dot. Each listed host may use custom ports and paths. Fabric writes explicit `[]` to revoke inherited trust and preserves omission when the setting is absent. System Relay configuration has higher priority and can enforce an empty list.
+Entries have no scheme, port, path, wildcard, brackets, or IPv6 zone identifier. DNS matching ignores case and a trailing dot. Each listed host may use custom ports and paths. NeMo Fabric writes explicit `[]` to revoke inherited trust and preserves omission when the setting is absent. System Relay configuration has higher priority and can enforce an empty list.
 
 Relay strips authorization, API-key, cookie, custom credential headers, and middleware-added credentials before forwarding remote HTTP model requests, including model credentials supplied to Pi. Configured upstream authentication conflicts with HTTP. Prompts and responses remain unencrypted. HTTPS is the default; this opt-in does not authorize MCP or observability endpoints, caller-selected destinations, or remote HTTP WebSockets.

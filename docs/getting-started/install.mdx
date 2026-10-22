@@ -346,9 +346,10 @@ Explicit `harness.settings.insecure_http_model_hosts` requires Relay CLI 0.11.x.
 It permits credential-free remote HTTP model traffic, with unencrypted prompts
 and responses. Omit the setting to retain compatibility with older CLIs.
 
-The Pi adapter also requires a user-supplied path to the
-[Relay Pi extension](https://github.com/NVIDIA/NeMo-Relay/tree/0.10.0/crates/cli/assets/pi-extension)
-from the Relay release that matches the CLI.
+The Pi adapter also requires a user-supplied extension path. Check
+`nemo-relay --version` and open the
+[matching Relay release](https://github.com/NVIDIA/NeMo-Relay/releases).
+Extract `crates/cli/assets/pi-extension` from that release's source archive.
 Set
 `harness.settings.relay_extension_path` to the extension file or package
 directory; relative paths resolve from `environment.workspace`. Relay-enabled

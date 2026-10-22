@@ -234,7 +234,7 @@ app-server trace is the required diagnostic surface.
 
 Relay-enabled runs can set `harness.settings.insecure_http_model_hosts` to an
 explicit list of hostnames or IP addresses, for example
-`["inference.internal", "10.0.0.10"]`. This requires NeMo Relay CLI >=0.11.0.
+`["inference.internal", "10.0.0.10"]`. This requires NeMo Relay CLI 0.11.x.
 Entries have no scheme, port, path, or wildcard; matching ignores DNS case and a
 trailing dot and permits any port or path on the listed host. An explicit empty
 list clears inherited HTTP trust. Omitting the setting preserves existing Relay

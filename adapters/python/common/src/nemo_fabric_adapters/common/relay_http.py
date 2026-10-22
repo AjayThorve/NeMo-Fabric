@@ -38,7 +38,7 @@ def relay_http_model_config(
             raise RelayHttpModelError(
                 f"harness.settings.{key}[{index}] must be a bare hostname or IP address"
             )
-        if ":" in host:
+        if host.count(":") >= 2:
             try:
                 if "%" in host:
                     raise ipaddress.AddressValueError(

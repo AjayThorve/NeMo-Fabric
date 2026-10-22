@@ -161,7 +161,7 @@ gateway and passes its explicit `base_url` to Relay as the upstream endpoint.
 
 ### Credential-free HTTP model gateways
 
-For Relay-enabled runs, NeMo Relay CLI >=0.11.0 supports explicit trust for
+For Relay-enabled runs, NeMo Relay CLI 0.11.x supports explicit trust for
 HTTP model hosts. Set `harness.settings.insecure_http_model_hosts` to the exact
 hostnames or IP addresses of your private inference gateways:
 

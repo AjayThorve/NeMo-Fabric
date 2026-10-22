@@ -69,3 +69,15 @@ def test_relay_http_hosts_require_supported_relay(hosts):
         relay_http_model_config(
             {"insecure_http_model_hosts": hosts}, RelayCliContract(version=(0, 10, 4))
         )
+
+
+@pytest.mark.parametrize(
+    "host", ["model.test:80", "http://model.test", "https://model.test"]
+)
+def test_relay_http_hosts_diagnose_schemes_and_ports(host):
+    with pytest.raises(
+        RelayHttpModelError, match="without a scheme, port, path, or wildcard"
+    ):
+        relay_http_model_config(
+            {"insecure_http_model_hosts": [host]}, RelayCliContract(version=(0, 11, 0))
+        )
