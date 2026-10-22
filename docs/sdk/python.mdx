@@ -910,11 +910,11 @@ artifacts/.fabric/<runtime_id>/<invocation_id>/
   stdout.txt
 ```
 
-Every sample and saved summary carries the existing runtime, invocation, and request IDs. `RunResult.artifacts` references both stats files. Without an explicit artifact root, these files use the runtime's temporary `.fabric` directory. Optional stats persistence failures produce diagnostics and preserve the agent outcome. Samples and a summary are retained even if the adapter protocol raises without a normalized result; they do not invent a terminal agent status or a second lifecycle journal. Consumers should handle an interrupted last JSONL line explicitly.
+Every sample and saved summary carries the existing runtime, invocation, and request IDs. `RunResult.artifacts` references both stats files. Without an explicit artifact root, these files use the runtime's temporary `.fabric` directory. Optional stats persistence failures produce diagnostics and preserve the agent outcome. A known series write failure suppresses its artifact reference while retaining in-memory reductions and a `sample_write_failed` diagnostic. Samples and a summary are retained even if the adapter protocol raises without a normalized result; they do not invent a terminal agent status or a second lifecycle journal. Consumers should handle an interrupted last JSONL line explicitly.
 
 ### Native Cgroup Constraints
 
-On Linux cgroup v2, `result.system_stats.cgroup` contains before/after observations for the **adapter host's cgroup**, plus CPU-use, throttled-time, and OOM-kill deltas. Snapshots expose visible CPU/memory limits, container-accounted current memory, swap, provider memory high-water, and CPU/memory/I/O pressure totals. Individual missing measurements remain explicit; unsupported platforms do not substitute host-wide readings.
+On Linux cgroup v2, `result.system_stats.cgroup` contains before/after observations for the **adapter host's cgroup**, plus CPU-use, throttled-time, and OOM-kill deltas. Snapshots expose visible CPU/memory limits, container-accounted current memory, swap, provider memory high-water, and CPU/memory/I/O pressure totals. Missing limit sources report `unsupported`; an explicit `max` limit reports `unlimited`. Individual missing measurements remain explicit; unsupported platforms do not substitute host-wide readings.
 
 This cgroup can contain the NeMo Fabric runner, the adapter tree, and other workloads. Its totals overlap process-tree totals and must not be added to them. Limits account for visible ancestors only; namespaces can hide additional restrictions. `memory_peak_bytes` covers cgroup lifetime or an external reset, not one invocation. The collector does not reset shared counters or write to cgroup control files.
 

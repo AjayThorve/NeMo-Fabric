@@ -969,7 +969,7 @@
               "type": "null"
             }
           ],
-          "description": "Series artifact, absent when its file could not be created."
+          "description": "Series artifact, absent when its file could not be created or fully written."
         },
         "target_interval_ms": {
           "description": "Requested cadence; actual timing is retained in sample offsets.",

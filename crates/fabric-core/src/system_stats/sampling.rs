@@ -134,7 +134,7 @@ pub struct SampleSummary {
     pub truncated: bool,
     /// Safe collection/persistence diagnostics. They never change agent status.
     pub diagnostics: Vec<String>,
-    /// Series artifact, absent when its file could not be created.
+    /// Series artifact, absent when its file could not be created or fully written.
     pub samples: Option<ArtifactRef>,
     /// Whether retained readings kept one cgroup identity with nondecreasing
     /// counters and no gaps over twice cadence. This does not prove exclusivity.
@@ -614,6 +614,7 @@ impl StatsSession {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if failed {
             state.diagnostics.push("sample_write_failed".into());
+            state.path = None;
         }
         state.summary(elapsed)
     }
@@ -726,6 +727,24 @@ mod tests {
         );
         assert_eq!(summary.cpu_time_seconds_estimate.value(), Some(&2.0));
         assert_eq!(summary.collection_seconds, 0.03);
+        drop(session);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_sample_write_keeps_reductions_without_publishing_partial_artifact() {
+        let (root, session) = session("write-failure", &reading(1.0));
+        let path = root.join("system-stats.jsonl");
+        let file = session.state.lock().unwrap().file.clone().unwrap();
+        file.lock().unwrap().writer = Some(File::open(&path).unwrap());
+        let summary = session.finish(1.0, &reading(2.0));
+        assert!(summary.samples.is_none());
+        assert_eq!(summary.sample_count, 2);
+        assert_eq!(summary.cpu_time_seconds_estimate.value(), Some(&1.0));
+        assert_eq!(summary.resident_memory_bytes.unwrap().valid_samples, 2);
+        assert!(summary.truncated);
+        assert_eq!(summary.diagnostics, vec!["sample_write_failed"]);
+        assert_eq!(std::fs::read_to_string(path).unwrap().lines().count(), 1);
         drop(session);
         let _ = std::fs::remove_dir_all(root);
     }

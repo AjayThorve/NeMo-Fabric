@@ -304,6 +304,7 @@ fn limits(
     memory_selected: bool,
 ) -> (Measurement<f64>, Measurement<u64>) {
     let mut cpu = Ok(None::<f64>);
+    let mut cpu_source_found = false;
     let cpuset = directory.join("cpuset.cpus.effective");
     if cpu_selected
         && !matches!(std::fs::metadata(&cpuset), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
@@ -313,6 +314,7 @@ fn limits(
             .map(|count| Some(count as f64));
     }
     let mut memory = Ok(None::<u64>);
+    let mut memory_source_found = false;
     let mut current = directory;
     for depth in 0..64 {
         for (name, cpu_file) in [("cpu.max", true), ("memory.max", false)] {
@@ -326,6 +328,7 @@ fn limits(
             }
             let result = read_text(&file, 4096);
             if cpu_file {
+                cpu_source_found = true;
                 match result.and_then(|text| {
                     let values: Vec<_> = text.split_whitespace().collect();
                     if values.len() != 2 {
@@ -353,6 +356,7 @@ fn limits(
                     Err(reason) => cpu = Err(reason),
                 }
             } else {
+                memory_source_found = true;
                 match result.and_then(|text| {
                     if text.trim() == "max" {
                         Ok(None)
@@ -386,13 +390,19 @@ fn limits(
     let cpu = match cpu {
         _ if !cpu_selected => Measurement::NotCollected,
         Ok(Some(value)) => Measurement::Available { value },
-        Ok(None) => Measurement::Unlimited,
+        Ok(None) if cpu_source_found => Measurement::Unlimited,
+        Ok(None) => Measurement::Unsupported {
+            reason: "kernel or controller does not expose this measurement".into(),
+        },
         Err(reason) => Measurement::unavailable(reason),
     };
     let memory = match memory {
         _ if !memory_selected => Measurement::NotCollected,
         Ok(Some(value)) => Measurement::Available { value },
-        Ok(None) => Measurement::Unlimited,
+        Ok(None) if memory_source_found => Measurement::Unlimited,
+        Ok(None) => Measurement::Unsupported {
+            reason: "kernel or controller does not expose this measurement".into(),
+        },
         Err(reason) => Measurement::unavailable(reason),
     };
     (cpu, memory)
@@ -679,6 +689,50 @@ mod tests {
         assert!(matches!(
             snapshot.visible_memory_limit_bytes,
             Measurement::Available { value: 1024 }
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_max_limits_remain_unlimited() {
+        let root = fixture("unlimited-limits");
+        let group = root.join("sys/fs/cgroup/parent/child");
+        std::fs::remove_file(group.join("cpuset.cpus.effective")).unwrap();
+        for name in ["cpu.max", "memory.max"] {
+            std::fs::remove_file(group.parent().unwrap().join(name)).unwrap();
+        }
+        let snapshot = read_host(&root, 42, &super::super::default_groups()).unwrap();
+        assert!(matches!(
+            snapshot.visible_cpu_limit_cores,
+            Measurement::Unlimited
+        ));
+        assert!(matches!(
+            snapshot.visible_memory_limit_bytes,
+            Measurement::Unlimited
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_limit_sources_are_unsupported() {
+        let root = fixture("absent-limits");
+        let group = root.join("sys/fs/cgroup/parent/child");
+        std::fs::remove_file(group.join("cpuset.cpus.effective")).unwrap();
+        for directory in [&group, group.parent().unwrap()] {
+            for name in ["cpu.max", "memory.max"] {
+                std::fs::remove_file(directory.join(name)).unwrap();
+            }
+        }
+        let snapshot = read_host(&root, 42, &super::super::default_groups()).unwrap();
+        assert!(matches!(
+            snapshot.visible_cpu_limit_cores,
+            Measurement::Unsupported { .. }
+        ));
+        assert!(matches!(
+            snapshot.visible_memory_limit_bytes,
+            Measurement::Unsupported { .. }
         ));
         let _ = std::fs::remove_dir_all(root);
     }
