@@ -914,7 +914,7 @@ Every sample and saved summary carries the existing runtime, invocation, and req
 
 ### Native Cgroup Constraints
 
-On Linux cgroup v2, `result.system_stats.cgroup` contains before/after observations for the **adapter host's cgroup**, plus CPU-use, throttled-time, and OOM-kill deltas. Snapshots expose visible CPU/memory limits, container-accounted current memory, swap, provider memory high-water, and CPU/memory/I/O pressure totals. Missing limit sources report `unsupported`; an explicit `max` limit reports `unlimited`. Individual missing measurements remain explicit; unsupported platforms do not substitute host-wide readings.
+On Linux cgroup v2, `result.system_stats.cgroup` contains before/after observations for the **adapter host's cgroup**, plus CPU-use, throttled-time, and OOM-kill deltas. Snapshots expose visible CPU/memory limits, container-accounted current memory, swap, provider memory high-water, and CPU/memory/I/O pressure totals. Missing limit sources report `unsupported`. Visible numeric limits take precedence over `max`; `unlimited` requires an explicit `max` source with no numeric bound. Individual missing measurements remain explicit; unsupported platforms do not substitute host-wide readings.
 
 This cgroup can contain the NeMo Fabric runner, the adapter tree, and other workloads. Its totals overlap process-tree totals and must not be added to them. Limits account for visible ancestors only; namespaces can hide additional restrictions. `memory_peak_bytes` covers cgroup lifetime or an external reset, not one invocation. The collector does not reset shared counters or write to cgroup control files.
 
