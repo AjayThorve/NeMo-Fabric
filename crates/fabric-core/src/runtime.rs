@@ -33,6 +33,9 @@ use crate::config::{
 use crate::environment::resolve_environment_provider;
 use crate::error::{FabricError, Result};
 use crate::resource_snapshot::{LocalHostProcess, RuntimeResourceSnapshot, snapshot_local_host};
+#[cfg(test)]
+use crate::system_stats::ResourceObservation;
+use crate::system_stats::{CgroupStats, InvocationSystemStats, StatsSession, SystemReader};
 
 mod openshell;
 use openshell::OpenShellRuntimeAdapter;
@@ -149,6 +152,10 @@ pub struct RunResult {
     /// result. Absent when the runtime's resources could not be observed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_snapshot: Option<RuntimeResourceSnapshot>,
+    /// Invocation duration and endpoint observations from the executing runner.
+    /// Absent in older results and when an execution backend does not collect them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_stats: Option<InvocationSystemStats>,
     /// Artifacts produced or collected by this run.
     #[serde(default)]
     pub artifacts: ArtifactManifest,
@@ -2034,19 +2041,96 @@ fn run_local_host_invocation_with_timeout(
             }
         };
         let fabric_invocation = write_fabric_invocation(&fabric_home, &adapter_payload)?;
-        match exchange_lifecycle_message(
+        let stats_config = plan.config.system_stats.as_ref();
+        let reader = SystemReader {
+            runtime_id: runtime.runtime_id.clone(),
+            host: local_host_processes().get(&runtime.runtime_id).cloned(),
+            local: runtime.environment.provider == "local",
+            collect: stats_config
+                .map(|config| config.collect.clone())
+                .unwrap_or_default(),
+        };
+        let before = stats_config.map(|_| reader.read());
+        let sampling = stats_config
+            .and_then(|config| config.sampling.as_ref())
+            .zip(before.as_ref())
+            .map(|(config, before)| {
+                StatsSession::prepare(config, &invocation, reader.clone(), before, &fabric_home)
+            });
+        let invocation_started = Instant::now();
+        if let Some(sampling) = &sampling {
+            sampling.start(invocation_started);
+        }
+        let exchange = exchange_lifecycle_message(
             &mut host_guard,
             &runtime.runtime_id,
             &lifecycle_request,
             invoke_timeout,
-        ) {
+        );
+        // Close the memory-only sampling window before reading the clock. No
+        // OS collection or sample-file I/O runs under this registration lock.
+        if let Some(sampling) = &sampling {
+            sampling.close();
+        }
+        let elapsed_seconds = invocation_started.elapsed().as_secs_f64();
+        // Endpoint collection and final artifact writes are outside elapsed time,
+        // and still under the host lock to exclude the next invocation.
+        let after = stats_config.map(|_| reader.read());
+        // Keep the independent final resource_snapshot contract even when the
+        // invocation stats block or its process group is disabled.
+        let resource_snapshot = if stats_config
+            .is_some_and(|config| config.includes(crate::SystemStatsMetricGroup::Process))
+        {
+            after
+                .as_ref()
+                .and_then(|reading| reading.adapter_tree.snapshot())
+                .cloned()
+        } else {
+            local_runtime_resource_snapshot(runtime).ok()
+        };
+        let system_stats = before
+            .zip(after)
+            .zip(stats_config)
+            .map(|((before, after), config)| {
+                let mut stats = InvocationSystemStats::new(
+                    before.adapter_tree,
+                    after.adapter_tree.clone(),
+                    elapsed_seconds,
+                );
+                stats.collected_groups = config.collect.clone();
+                if config
+                    .collect
+                    .iter()
+                    .any(|group| *group != crate::SystemStatsMetricGroup::Process)
+                {
+                    let mut cgroup = CgroupStats::new(before.cgroup, after.cgroup.clone());
+                    if !config.includes(crate::SystemStatsMetricGroup::CgroupCpu) {
+                        cgroup.cpu_usage_microseconds = crate::Measurement::NotCollected;
+                        cgroup.cpu_throttled_microseconds = crate::Measurement::NotCollected;
+                    }
+                    if !config.includes(crate::SystemStatsMetricGroup::CgroupMemory) {
+                        cgroup.oom_kills = crate::Measurement::NotCollected;
+                    }
+                    stats.cgroup = Some(cgroup);
+                }
+                if let Some(sampling) = &sampling {
+                    stats.sampled = Some(sampling.finish(elapsed_seconds, &after));
+                }
+                stats
+            });
+        // Optional evidence never replaces the adapter's original outcome.
+        let stats_summary = system_stats
+            .as_ref()
+            .filter(|_| sampling.is_some())
+            .map(|stats| crate::system_stats::persist_summary(stats, &invocation, &fabric_home));
+        match exchange {
             Ok(output) => {
                 let stderr = take_local_host_stderr(&mut host_guard);
-                // Read while the host lock is held, so no later invocation is counted.
-                let resource_snapshot = local_runtime_resource_snapshot(runtime).ok();
                 Ok((
                     output,
                     resource_snapshot,
+                    system_stats,
+                    stats_summary,
                     stderr,
                     host_guard.command.clone(),
                     host_guard.child.id(),
@@ -2070,6 +2154,8 @@ fn run_local_host_invocation_with_timeout(
     let (
         adapter_output,
         resource_snapshot,
+        system_stats,
+        stats_summary,
         stderr,
         host_command,
         host_pid,
@@ -2179,6 +2265,26 @@ fn run_local_host_invocation_with_timeout(
             "text/plain",
         )?;
     }
+    if let Some(sampled) = system_stats
+        .as_ref()
+        .and_then(|stats| stats.sampled.as_ref())
+    {
+        if let Some(samples) = &sampled.samples {
+            artifacts.artifacts.push(samples.clone());
+        }
+    }
+    match stats_summary {
+        Some(Ok(reference)) => artifacts.artifacts.push(reference),
+        Some(Err(_)) => events.push(event_with_metadata(
+            "system_stats_unavailable",
+            "system stats summary could not be persisted",
+            BTreeMap::from([(
+                "code".into(),
+                Value::String("stats_summary_write_failed".into()),
+            )]),
+        )),
+        None => {}
+    }
     collect_workspace_artifacts(&mut artifacts, &fabric_home, runtime, &mut events)?;
     promote_agent_artifacts_to_manifest(&agent_result.artifacts, &mut artifacts);
     promote_relay_artifacts_to_manifest(&output, &mut artifacts);
@@ -2222,6 +2328,7 @@ fn run_local_host_invocation_with_timeout(
         error,
         usage: agent_result.usage.as_ref().map(run_usage),
         resource_snapshot,
+        system_stats,
         artifacts,
         telemetry: telemetry_ref(plan, relay_config.as_ref())
             .into_iter()
@@ -4186,6 +4293,11 @@ for line in sys.stdin:
                     "choices": [{"index": 0, "delta": {"content": "lo"}}],
                 },
             ])
+        if MODE == "memory_spike":
+            subprocess.run([sys.executable, "-c",
+                "import time\ndata=bytearray(192*1024*1024)\n"
+                "for i in range(0,len(data),4096): data[i]=1\n"
+                "time.sleep(0.7)"], check=True)
         if MODE == "busy":
             # A descendant that burns 1.2 s of CPU, then exits and is waited for.
             subprocess.run([sys.executable, "-c",
@@ -4470,6 +4582,7 @@ for line in sys.stdin:
             error: None,
             usage: None,
             resource_snapshot: None,
+            system_stats: None,
             artifacts: ArtifactManifest::default(),
             telemetry: vec![
                 TelemetryRef {
@@ -5040,6 +5153,277 @@ for line in sys.stdin:
             snapshot.cpu_time_seconds >= 1.0,
             "descendant CPU missing: {snapshot:?}"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn invocation_stats_isolate_concurrent_work_on_a_warm_runtime() {
+        let (root, plan) = local_host_plan("busy");
+        let runtime = start_runtime(&plan).expect("start local host");
+        let wall_started = Instant::now();
+        let mut results = thread::scope(|scope| {
+            let first = scope.spawn(|| invoke_runtime(&plan, &runtime, RunRequest::text("one")));
+            let second = scope.spawn(|| invoke_runtime(&plan, &runtime, RunRequest::text("two")));
+            vec![
+                first.join().unwrap().unwrap(),
+                second.join().unwrap().unwrap(),
+            ]
+        });
+        let wall_elapsed = wall_started.elapsed().as_secs_f64();
+        stop_runtime(&plan, &runtime).expect("stop local host");
+        results.sort_by_key(|result| result.output["invocation_count"].as_u64().unwrap());
+        let first = results[0].system_stats.as_ref().expect("first stats");
+        let second = results[1].system_stats.as_ref().expect("second stats");
+        for result in &results {
+            let stats = result.system_stats.as_ref().unwrap();
+            assert!(stats.elapsed_seconds > 0.0);
+            let cpu = stats.cpu_time_seconds_estimate.expect("CPU estimate");
+            assert!(cpu >= 1.0, "waited child CPU missing: {stats:?}");
+            assert_eq!(stats.after.snapshot(), result.resource_snapshot.as_ref());
+        }
+        assert!(
+            second.before.snapshot().unwrap().cpu_time_seconds
+                >= first.after.snapshot().unwrap().cpu_time_seconds
+        );
+        assert!(
+            second.cpu_time_seconds_estimate.unwrap()
+                < second.after.snapshot().unwrap().cpu_time_seconds - 0.9,
+            "second estimate includes previous invocation's CPU"
+        );
+        assert!(
+            first.elapsed_seconds + second.elapsed_seconds <= wall_elapsed,
+            "elapsed measurements include time queued behind another invocation"
+        );
+        assert_ne!(results[0].invocation_id, results[1].invocation_id);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn disabling_invocation_stats_survives_serialization_and_preserves_final_snapshot() {
+        let (root, mut plan) = local_host_plan("echo");
+        assert!(plan.config.system_stats.is_some());
+        plan.config.system_stats = None;
+        let mapping = serde_json::to_value(&plan.config).unwrap();
+        assert!(mapping.get("system_stats").unwrap().is_null());
+        let decoded: crate::FabricConfig = serde_json::from_value(mapping.clone()).unwrap();
+        assert!(decoded.system_stats.is_none());
+        let mut omitted = mapping;
+        omitted.as_object_mut().unwrap().remove("system_stats");
+        let decoded: crate::FabricConfig = serde_json::from_value(omitted).unwrap();
+        assert_eq!(decoded.system_stats, Some(Default::default()));
+        let result = run_plan(&plan, RunRequest::text("disabled")).unwrap();
+        assert!(result.system_stats.is_none());
+        assert!(result.resource_snapshot.is_some());
+        assert!(
+            !result
+                .artifacts
+                .artifacts
+                .iter()
+                .any(|a| a.kind.starts_with("system_stats"))
+        );
+        let home = Path::new(result.metadata["fabric_home"].as_str().unwrap());
+        assert!(!home.join("system-stats.jsonl").exists());
+        assert!(!home.join("system-stats-summary.json").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn filtered_sampling_does_not_collect_unselected_process_or_memory_groups() {
+        let (root, mut plan) = local_host_plan("echo");
+        plan.config.system_stats = Some(crate::SystemStatsConfig {
+            collect: vec![crate::SystemStatsMetricGroup::CgroupCpu],
+            sampling: Some(Default::default()),
+        });
+        let result = run_plan(&plan, RunRequest::text("filtered")).unwrap();
+        let stats = result.system_stats.unwrap();
+        assert!(matches!(stats.before, ResourceObservation::NotCollected));
+        assert!(matches!(stats.after, ResourceObservation::NotCollected));
+        assert!(stats.cpu_time_seconds_estimate.is_none());
+        assert!(matches!(
+            stats.cgroup.unwrap().oom_kills,
+            crate::Measurement::NotCollected
+        ));
+        let sampled = stats.sampled.unwrap();
+        assert!(sampled.resident_memory_bytes.is_none());
+        assert!(sampled.process_count.is_none());
+        assert!(matches!(
+            sampled.cpu_time_seconds_estimate,
+            crate::Measurement::NotCollected
+        ));
+        let rows: Vec<Value> = fs::read_to_string(sampled.samples.unwrap().path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter()
+                .all(|row| row["adapter_tree"]["status"] == "not_collected")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn sampled_stats_capture_transient_worker_memory_and_preserve_correlation() {
+        let (root, mut plan) = local_host_plan("memory_spike");
+        plan.config.system_stats = Some(crate::SystemStatsConfig {
+            sampling: Some(crate::SystemStatsSamplingConfig {
+                interval_ms: 100,
+                max_samples: 100,
+            }),
+            ..Default::default()
+        });
+        let result = run_plan(&plan, RunRequest::text("spike")).expect("run with sampling");
+        let stats = result.system_stats.as_ref().unwrap();
+        let summary = stats.sampled.as_ref().unwrap();
+        let gauge = summary.resident_memory_bytes.as_ref().unwrap();
+        assert!(
+            gauge.sampled_peak.unwrap()
+                > stats.after.snapshot().unwrap().resident_memory_bytes + 128 * 1024 * 1024,
+            "peak was lost after worker exit: {summary:?}"
+        );
+        assert!(summary.sample_count >= 3);
+        assert!(gauge.covered_fraction > 0.0);
+        let path = &summary.samples.as_ref().unwrap().path;
+        let rows: Vec<Value> = fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), summary.sample_count as usize);
+        for row in &rows {
+            assert_eq!(row["runtime_id"], result.runtime_id);
+            assert_eq!(row["invocation_id"], result.invocation_id);
+            assert_eq!(row["request_id"], result.request_id);
+            assert!(row["offset_seconds"].as_f64().unwrap() <= stats.elapsed_seconds);
+        }
+        assert_eq!(
+            rows.last().unwrap()["offset_seconds"].as_f64(),
+            Some(stats.elapsed_seconds)
+        );
+        let reference = result
+            .artifacts
+            .artifacts
+            .iter()
+            .find(|a| a.kind == "system_stats_summary")
+            .unwrap();
+        let saved: Value =
+            serde_json::from_str(&fs::read_to_string(&reference.path).unwrap()).unwrap();
+        assert_eq!(saved["invocation_id"], result.invocation_id);
+        assert_eq!(saved["system_stats"], serde_json::to_value(stats).unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn sampled_stats_keep_final_endpoint_when_retention_is_full() {
+        let (root, mut plan) = local_host_plan("busy");
+        plan.config.system_stats = Some(crate::SystemStatsConfig {
+            sampling: Some(crate::SystemStatsSamplingConfig {
+                interval_ms: 100,
+                max_samples: 2,
+            }),
+            ..Default::default()
+        });
+        let result = run_plan(&plan, RunRequest::text("bounded")).unwrap();
+        let stats = result.system_stats.unwrap();
+        let before = stats.before.snapshot().unwrap();
+        let after = stats.after.snapshot().unwrap();
+        assert_eq!(
+            stats.cpu_time_seconds_estimate,
+            Some(after.cpu_time_seconds - before.cpu_time_seconds)
+        );
+        if let Some(cgroup) = &stats.cgroup
+            && let Some((before, after)) = cgroup.before.snapshot().zip(cgroup.after.snapshot())
+            && let Some((before, after)) = before
+                .cpu_usage_microseconds
+                .value()
+                .zip(after.cpu_usage_microseconds.value())
+        {
+            assert_eq!(
+                cgroup.cpu_usage_microseconds,
+                crate::Measurement::Available {
+                    value: after - before
+                }
+            );
+        }
+        let summary = stats.sampled.unwrap();
+        assert!(matches!(
+            summary.cpu_time_seconds_estimate,
+            crate::Measurement::Unavailable { .. }
+        ));
+        assert_eq!(summary.sample_count, 2);
+        assert!(summary.dropped_samples > 0);
+        assert!(summary.truncated);
+        let rows: Vec<Value> = fs::read_to_string(summary.samples.unwrap().path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[1]["offset_seconds"].as_f64(),
+            Some(stats.elapsed_seconds)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn protocol_failure_retains_sample_evidence_without_replacing_the_error() {
+        let (root, mut plan) = local_host_plan("invoke_failure");
+        plan.config.system_stats = Some(crate::SystemStatsConfig {
+            sampling: Some(Default::default()),
+            ..Default::default()
+        });
+        let runtime = start_runtime(&plan).unwrap();
+        let error = invoke_runtime(&plan, &runtime, RunRequest::text("fail")).unwrap_err();
+        assert!(
+            matches!(error, FabricError::AdapterLifecycleOperation { code, .. } if code == "fake_invoke")
+        );
+        stop_runtime(&plan, &runtime).unwrap();
+        let path = root.join("artifacts/.fabric").join(runtime.runtime_id);
+        let summaries: Vec<_> = fs::read_dir(path)
+            .unwrap()
+            .filter_map(|entry| {
+                let path = entry.unwrap().path().join("system-stats-summary.json");
+                path.is_file().then_some(path)
+            })
+            .collect();
+        assert_eq!(summaries.len(), 1);
+        let summary: Value =
+            serde_json::from_str(&fs::read_to_string(&summaries[0]).unwrap()).unwrap();
+        assert_eq!(summary["system_stats"]["sampled"]["sample_count"], 2);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn observation_failure_preserves_invocation_result() {
+        let (root, plan) = local_host_plan("adapter_reported_failure");
+        let runtime = start_runtime(&plan).expect("start local host");
+        // Make observation unavailable without breaking the live adapter protocol.
+        local_host_processes().remove(&runtime.runtime_id);
+        let result = invoke_runtime(&plan, &runtime, RunRequest::text("fail"))
+            .expect("normalized adapter failure still returns a result");
+        stop_runtime(&plan, &runtime).expect("stop local host");
+        assert_eq!(result.status, RunStatus::Failed);
+        assert_eq!(result.error.unwrap().code, "fake_adapter_failure");
+        assert!(result.resource_snapshot.is_none());
+        let stats = result.system_stats.expect("duration and availability");
+        assert!(stats.elapsed_seconds > 0.0);
+        assert!(stats.cpu_time_seconds_estimate.is_none());
+        for observation in [&stats.before, &stats.after] {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            assert!(
+                matches!(observation, ResourceObservation::Unavailable { reason } if !reason.is_empty())
+            );
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            assert!(
+                matches!(observation, ResourceObservation::Unsupported { reason } if !reason.is_empty())
+            );
+        }
         let _ = fs::remove_dir_all(root);
     }
 

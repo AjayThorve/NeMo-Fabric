@@ -17,6 +17,7 @@ Every invocation that reaches the adapter boundary returns a normalized
 | `error` | Structured failure metadata when available. Branch on `status`, not on this field. |
 | `output` | Harness output normalized to the configured output schema. |
 | `usage` | Optional `RunUsage` with invocation-local input, cached-input, output, and total token counts, reported cost in USD, and provider metadata. |
+| `system_stats` | Optional `InvocationSystemStats`: adapter exchange duration, before/after process-tree observations, and an optional CPU counter difference estimate. |
 | `resource_snapshot` | Optional `RuntimeResourceSnapshot` of the runtime, read once after the adapter returned the result. `None` when the read failed. |
 | `artifacts` | Output files, logs, patches, and other materialized references. |
 | `telemetry` | References to NVIDIA NeMo Relay or other telemetry streams from the run. |
@@ -49,16 +50,19 @@ Treat missing counters and cost as unknown, not zero. `cached_input_tokens` repo
 
 ## Runtime Resource Snapshots
 
-`await runtime.resource_snapshot()` returns a `RuntimeResourceSnapshot` with
-`runtime_id`, `started_at` and `observed_at` (RFC 3339 UTC),
-`resident_memory_bytes`, `process_count`, and `cpu_time_seconds`. It covers the
-local adapter host process and its descendants (not a shared service process),
-and it does not wait for an active invocation. CPU time is cumulative since the
-host started, so subtract an earlier snapshot to estimate one invocation; it
-can drop when a descendant leaves the tree, so treat a negative difference as
-unknown. Values that cannot be read raise an error, never read as zero.
-Snapshots observe only; enforce limits in the operating system or execution
-environment.
+`await runtime.resource_snapshot()` returns a `RuntimeResourceSnapshot` of the local adapter host and its descendants. By default, `RunResult.system_stats` brackets each invocation under its host lock: `before` and `after` have `status="available"` plus a typed `snapshot`, or `status="unavailable"` / `"unsupported"` plus `reason`. A failed read preserves the adapter outcome. `elapsed_seconds` uses a monotonic clock around the adapter exchange and excludes startup, endpoint collection, artifact preparation, and teardown. Older results and backends without collection have `system_stats=None`.
+
+`cpu_time_seconds_estimate` subtracts the baseline CPU counter from the final counter, excluding previous invocations on a warm runtime. It is absent if an endpoint is missing, identities differ, or the counter decreases. Reaping, reparenting, and background work in the same tree can distort a positive estimate too. Endpoint memory and process counts are instantaneous, not peaks or averages. The compatible `resource_snapshot` field repeats the final available reading. Collection runs where the adapter executes, including inside a Harbor task runner, and requires no Relay collector or additional identity hierarchy. Default endpoint collection adds no artifact file; opt-in sampling retains the correlated files described below. Protocol failures without a normalized result still raise without a partial `RunResult`. Enforce limits in the operating system or execution environment.
+
+## Native Sampled System Stats
+
+Omitting `FabricConfig.system_stats` selects all supported groups at the endpoints. Set it explicitly to `None` to disable invocation stats and their artifacts; null survives planning and runner transport. The existing final `resource_snapshot` remains independent. `SystemStatsConfig()` enables endpoints without sampling. To sample, use `SystemStatsConfig(sampling=SystemStatsSamplingConfig(interval_ms=1000, max_samples=10000))`. These are NeMo Fabric-owned settings and are not projected into adapter runtime extensions. Sampling needs neither Relay nor recording.
+
+`collect=["process", "cgroup.cpu"]` selects groups for both endpoint and periodic collection. Supported groups are `process`, `cgroup.cpu`, `cgroup.memory`, and `cgroup.pressure`; omission selects all, while empty lists, duplicates, and unknown names are rejected. The invocation collector skips excluded groups; the independent final `resource_snapshot` still reads the process tree. `collected_groups` records selection; excluded observations/measurements have `status="not_collected"`, distinct from selected-but-unavailable evidence. Unselected process reductions and an entirely excluded cgroup block are omitted. Setting `config.system_stats.sampling=None` disables only sampling and keeps the selected endpoints.
+
+`RunResult.system_stats.sampled` carries gauge final/min/sampled peak/time-weighted mean, coverage, collection time, dropped samples, truncation, and a JSONL artifact reference. Both stats artifacts are referenced by `RunResult.artifacts`; each sample retains all three existing execution IDs. Late samples do not cross invocation boundaries. Retained JSONL offsets allow consumer-owned benchmark tooling to inspect trajectory windows. Gauge means use hold-last-value only across valid intervals no larger than twice cadence; extrema remain sampled.
+
+`system_stats.cgroup` describes the adapter host's Linux cgroup v2, not exclusive invocation usage. Visible ancestor limits, accounted memory, swap, provider-lifetime memory peak, CPU throttling, OOM kills, and pressure are distinct from process-tree RSS/CPU. Scopes overlap; do not sum them. Hidden ancestors and missing sources remain unknown. A provider high-water mark is never relabeled an invocation peak. Collection does not modify limits or reset counters, and optional collection/persistence errors preserve agent status.
 
 ## Correlation IDs
 
