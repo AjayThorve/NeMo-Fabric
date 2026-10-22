@@ -165,6 +165,7 @@ def to_fabric_config(job) -> FabricConfig:
   ordinary Python functions; each copy plans and runs independently.
 - Pass `base_dir=...` to any `Fabric` call when the config uses relative paths,
   so skills, workspaces, and artifacts anchor to the consumer's own layout.
+- For dynamic Relay plugins, enable `telemetry.providers.relay` and supply `relay.plugins.dynamic` records. Core preserves the `relay.plugins` section in the resolved Relay plugin configuration, including when there are no static components. For Hermes, use absolute manifest paths accessible inside the agent environment; Relay validates and activates the plugins.
 
 The repository [`code_review_agent` example](https://github.com/NVIDIA/NeMo-Fabric/tree/main/examples/code_review_agent)
 shows this pattern end to end with complete Hermes Agent, Codex, Deep Agents,

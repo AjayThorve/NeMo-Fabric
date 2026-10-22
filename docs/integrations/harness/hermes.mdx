@@ -107,6 +107,25 @@ Use `runtime.max_turns` to set the Hermes agent-loop budget. The adapter maps
 that normalized field to `AIAgent.max_iterations`; `max_iterations` is not a
 Hermes harness setting.
 
+## Configure Dynamic Relay Plugins
+
+Configure dynamic Relay plugins under `relay.plugins.dynamic` and enable `telemetry.providers.relay`. NeMo Fabric preserves the `plugins` configuration in the generated `plugins.toml` passed to Hermes. Relay owns manifest validation, plugin loading, and activation. Use absolute manifest paths that are accessible inside the agent environment.
+
+For example, add the following sections to your NeMo Fabric configuration:
+
+```yaml
+telemetry:
+  providers:
+    relay: {}
+relay:
+  plugins:
+    dynamic:
+      - manifest: /opt/switchyard/relay-plugin.toml
+        enabled: true
+```
+
+Dynamic plugins can run alongside `relay.observability` and `relay.components`, or without static components. They require a compatible Hermes checkout and Relay installation as described in [Install the Adapter](#install-the-adapter).
+
 ## Understand the Runtime Lifecycle
 
 Each NeMo Fabric runtime creates one Hermes Agent `AIAgent` and one `SessionDB`.
