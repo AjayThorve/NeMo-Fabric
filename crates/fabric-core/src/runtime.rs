@@ -5317,6 +5317,7 @@ for line in sys.stdin:
         let _ = fs::remove_dir_all(root);
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn sampled_stats_keep_final_endpoint_when_retention_is_full() {
         let (root, mut plan) = local_host_plan("busy");
