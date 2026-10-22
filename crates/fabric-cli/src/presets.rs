@@ -306,6 +306,7 @@ fn config(
         skills: None,
         mcp: None,
         telemetry: None,
+        system_stats: None,
         relay: None,
         extensions: BTreeMap::new(),
     }

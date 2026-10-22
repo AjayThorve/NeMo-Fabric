@@ -1077,6 +1077,20 @@ class ToolsConfig(FabricBaseModel):
         return self
 
 
+class SystemStatsConfig(FabricBaseModel):
+    """Bounded native resource sampling, independent of Relay and recording.
+
+    Endpoint observations are always returned. Setting this block enables a
+    per-invocation JSONL series and reductions. The retention bound includes
+    both endpoints; the final endpoint is preserved when the series fills.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sample_interval_ms: int = Field(default=1000, ge=100, le=60000, strict=True)
+    max_samples: int = Field(default=10000, ge=2, le=100000, strict=True)
+
+
 class FabricConfig(FabricBaseModel):
     """SDK-facing typed NeMo Fabric agent configuration.
 
@@ -1097,6 +1111,7 @@ class FabricConfig(FabricBaseModel):
     instructions: InstructionsConfig | None = None
     mcp: McpConfig | None = None
     skills: SkillConfig | None = None
+    system_stats: SystemStatsConfig | None = None
     telemetry: TelemetryConfig | None = None
     relay: RelayConfig | None = None
     tools: ToolsConfig | None = None

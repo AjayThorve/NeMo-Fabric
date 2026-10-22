@@ -39,6 +39,7 @@ from nemo_fabric.models import RelayOpenTelemetryConfig
 from nemo_fabric.models import RelayOpenTelemetryEndpointConfig
 from nemo_fabric.models import RelayS3StorageConfig
 from nemo_fabric.models import RunRequest
+from nemo_fabric.models import SystemStatsConfig
 from nemo_fabric.models import RuntimeConfig
 from nemo_fabric.models import SkillConfig
 from nemo_fabric.models import TelemetryConfig
@@ -52,6 +53,7 @@ from nemo_fabric.runtime import RuntimeStatus
 from nemo_fabric.service import Service
 from nemo_fabric.service import ServiceStatus
 from nemo_fabric.streaming import InvokeStream
+from nemo_fabric.stats import summarize_system_stats
 from nemo_fabric.types import AdapterInfo
 from nemo_fabric.types import ArtifactManifest
 from nemo_fabric.types import ArtifactRef
@@ -63,6 +65,12 @@ from nemo_fabric.types import EnvironmentReference
 from nemo_fabric.types import FabricEvent
 from nemo_fabric.types import RunOutput
 from nemo_fabric.types import RunPlan
+from nemo_fabric.types import CgroupObservation
+from nemo_fabric.types import CgroupSnapshot
+from nemo_fabric.types import CgroupStats
+from nemo_fabric.types import GaugeSummary
+from nemo_fabric.types import Measurement
+from nemo_fabric.types import SampleSummary
 from nemo_fabric.types import InvocationSystemStats
 from nemo_fabric.types import ResourceObservation
 from nemo_fabric.types import RunResult
@@ -123,6 +131,13 @@ __all__ = [
     "RunOutput",
     "RunPlan",
     "RunRequest",
+    "CgroupObservation",
+    "CgroupSnapshot",
+    "CgroupStats",
+    "GaugeSummary",
+    "Measurement",
+    "SampleSummary",
+    "summarize_system_stats",
     "InvocationSystemStats",
     "ResourceObservation",
     "RunResult",
@@ -130,6 +145,7 @@ __all__ = [
     "RuntimeCapabilities",
     "RuntimeHandle",
     "RuntimeResourceSnapshot",
+    "SystemStatsConfig",
     "RuntimeConfig",
     "Runtime",
     "RuntimeStatus",

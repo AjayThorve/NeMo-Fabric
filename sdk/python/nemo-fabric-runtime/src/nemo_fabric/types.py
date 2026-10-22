@@ -968,6 +968,7 @@ class _FabricConfigSnapshot(_ConfigMapping):
             "instructions",
             "mcp",
             "skills",
+            "system_stats",
             "telemetry",
             "relay",
             "tools",
@@ -991,6 +992,7 @@ class _FabricConfigSnapshot(_ConfigMapping):
         skills: Mapping[str, Any] | None = None,
         telemetry: Mapping[str, Any] | None = None,
         relay: Mapping[str, Any] | None = None,
+        system_stats: Mapping[str, Any] | None = None,
         tools: Mapping[str, Any] | None = None,
         extra_fields: Mapping[str, Any] | None = None,
     ) -> None:
@@ -1034,6 +1036,13 @@ class _FabricConfigSnapshot(_ConfigMapping):
             if telemetry is None
             else _coerce(_TelemetryConfig, telemetry, "telemetry")
         )
+        from nemo_fabric.models import SystemStatsConfig
+
+        stats_value = (
+            None
+            if system_stats is None
+            else SystemStatsConfig.from_mapping(system_stats).to_mapping()
+        )
         relay_value = None if relay is None else _mapping(relay, "relay")
         tools_value = None if tools is None else _coerce(_ToolsConfig, tools, "tools")
         values: dict[str, Any] = {
@@ -1050,6 +1059,7 @@ class _FabricConfigSnapshot(_ConfigMapping):
             ("instructions", instructions_value),
             ("mcp", mcp_value),
             ("skills", skills_value),
+            ("system_stats", stats_value),
             ("telemetry", telemetry_value),
             ("relay", relay_value),
             ("tools", tools_value),
@@ -1086,6 +1096,7 @@ class _FabricConfigSnapshot(_ConfigMapping):
             instructions=data.get("instructions"),
             mcp=data.get("mcp"),
             skills=data.get("skills"),
+            system_stats=data.get("system_stats"),
             telemetry=data.get("telemetry"),
             relay=data.get("relay"),
             tools=data.get("tools"),
@@ -2095,6 +2106,321 @@ class ResourceObservation(FabricMapping):
         return data
 
 
+def _stats_number(value: Any, name: str, *, integer: bool = False) -> int | float:
+    try:
+        finite = (
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and math.isfinite(value)
+        )
+    except OverflowError:
+        finite = False
+    if not finite or value < 0:
+        raise FabricConfigError(f"{name} must be a finite nonnegative number")
+    if integer and (not isinstance(value, int) or value > _UINT64_MAX):
+        raise FabricConfigError(f"{name} must be an unsigned 64-bit integer")
+    return value if integer else float(value)
+
+
+class Measurement(FabricMapping):
+    """Measured numeric value, an unlimited limit, or explicit missing evidence.
+
+    Attributes:
+        status: available, unlimited, unavailable, or unsupported.
+        value: Numeric reading when available, otherwise None.
+        reason: Collection failure/capability reason, otherwise None.
+    """
+
+    status: str
+    _fields = frozenset({"status", "value", "reason"})
+
+    @property
+    def value(self) -> int | float | None:
+        """Return an available reading, otherwise None."""
+        return self._data.get("value")
+
+    @property
+    def reason(self) -> str | None:
+        """Return the reason for missing evidence, otherwise None."""
+        return self._data.get("reason")
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        status = data.get("status")
+        if status == "available":
+            _stats_number(data.get("value"), "measurement value")
+            if "reason" in data:
+                raise FabricConfigError("available measurement cannot contain reason")
+        elif status in ("unsupported", "unavailable"):
+            data["reason"] = _required_text(data.get("reason"), "measurement reason")
+            if "value" in data:
+                raise FabricConfigError("missing measurement cannot contain value")
+        elif status == "unlimited":
+            if "reason" in data or "value" in data:
+                raise FabricConfigError("unlimited measurement has no value or reason")
+        else:
+            raise FabricConfigError("invalid measurement status")
+        return data
+
+
+def _stats_measurement(
+    value: Any, *, integer: bool = True, limit: bool = False
+) -> Measurement:
+    reading = Measurement.from_mapping(value)
+    if reading.status == "available":
+        _stats_number(reading.value, "measurement value", integer=integer)
+    if reading.status == "unlimited" and not limit:
+        raise FabricConfigError("only resource limits may be unlimited")
+    return reading
+
+
+class CgroupSnapshot(FabricMapping):
+    """Native adapter-host cgroup measurements, separate from process RSS.
+
+    Counters cover this cgroup and its descendants, potentially including other
+    workloads. Limits are visible ancestor bounds; hidden ancestors and actual
+    exclusive capacity are unknown. memory_peak_bytes covers cgroup lifetime or
+    its last external reset, never this invocation's peak.
+    """
+
+    source: str
+    scope: str
+    target: str
+    observed_at: str
+    visible_cpu_limit_cores: Measurement
+    visible_memory_limit_bytes: Measurement
+    memory_current_bytes: Measurement
+    memory_peak_bytes: Measurement
+    swap_current_bytes: Measurement
+    cpu_usage_microseconds: Measurement
+    cpu_throttled_microseconds: Measurement
+    oom_kills: Measurement
+    pressure_stall_microseconds: Mapping[str, Measurement]
+    _counters = frozenset(
+        {
+            "memory_current_bytes",
+            "memory_peak_bytes",
+            "swap_current_bytes",
+            "cpu_usage_microseconds",
+            "cpu_throttled_microseconds",
+            "oom_kills",
+        }
+    )
+    _fields = _counters | frozenset(
+        {
+            "source",
+            "scope",
+            "target",
+            "observed_at",
+            "visible_cpu_limit_cores",
+            "visible_memory_limit_bytes",
+            "pressure_stall_microseconds",
+        }
+    )
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        for field in ("source", "scope", "target"):
+            data[field] = _required_text(data.get(field), field)
+        data["observed_at"] = _utc_timestamp(data.get("observed_at"), "observed at")
+        for field in cls._counters:
+            data[field] = _stats_measurement(data.get(field))
+        data["visible_cpu_limit_cores"] = _stats_measurement(
+            data.get("visible_cpu_limit_cores"), integer=False, limit=True
+        )
+        data["visible_memory_limit_bytes"] = _stats_measurement(
+            data.get("visible_memory_limit_bytes"), limit=True
+        )
+        data["pressure_stall_microseconds"] = {
+            name: _stats_measurement(reading)
+            for name, reading in _mapping(
+                data.get("pressure_stall_microseconds"), "pressure readings"
+            ).items()
+        }
+        return data
+
+
+class CgroupObservation(FabricMapping):
+    """Native cgroup snapshot or explicit unavailable/unsupported reason."""
+
+    status: str
+    _fields = frozenset({"status", "snapshot", "reason"})
+
+    @property
+    def snapshot(self) -> CgroupSnapshot | None:
+        """Return the cgroup reading, otherwise None."""
+        return self._data.get("snapshot")
+
+    @property
+    def reason(self) -> str | None:
+        """Return the missing-evidence reason, otherwise None."""
+        return self._data.get("reason")
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        if data.get("status") == "available":
+            if "reason" in data:
+                raise FabricConfigError("available observation cannot contain reason")
+            data["snapshot"] = CgroupSnapshot.from_mapping(data.get("snapshot"))
+        elif data.get("status") in ("unavailable", "unsupported"):
+            if "snapshot" in data:
+                raise FabricConfigError("missing observation cannot contain snapshot")
+            data["reason"] = _required_text(data.get("reason"), "observation reason")
+        else:
+            raise FabricConfigError("invalid cgroup observation status")
+        return data
+
+
+class CgroupStats(FabricMapping):
+    """Cgroup endpoint observations and counter deltas over an invocation."""
+
+    before: CgroupObservation
+    after: CgroupObservation
+    cpu_usage_microseconds: Measurement
+    cpu_throttled_microseconds: Measurement
+    oom_kills: Measurement
+    _fields = frozenset(
+        {
+            "before",
+            "after",
+            "cpu_usage_microseconds",
+            "cpu_throttled_microseconds",
+            "oom_kills",
+        }
+    )
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        for field in ("before", "after"):
+            data[field] = CgroupObservation.from_mapping(data.get(field))
+        for field in (
+            "cpu_usage_microseconds",
+            "cpu_throttled_microseconds",
+            "oom_kills",
+        ):
+            data[field] = _stats_measurement(data.get(field))
+        return data
+
+
+class GaugeSummary(FabricMapping):
+    """Sampled gauge extrema, hold-last-value mean, and covered time.
+
+    Sampled peak is not true high-water. Means exclude missing readings and
+    gaps longer than twice the requested cadence. covered_fraction discloses
+    how much of the invocation contributes to the mean.
+    """
+
+    unit: str
+    final_value: int | None
+    min: int | None
+    sampled_peak: int | None
+    time_weighted_mean: float | None
+    valid_samples: int
+    covered_seconds: float
+    covered_fraction: float
+    _fields = frozenset(
+        {
+            "unit",
+            "final_value",
+            "min",
+            "sampled_peak",
+            "time_weighted_mean",
+            "valid_samples",
+            "covered_seconds",
+            "covered_fraction",
+        }
+    )
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        data["unit"] = _required_text(data.get("unit"), "gauge unit")
+        for field in ("final_value", "min", "sampled_peak", "time_weighted_mean"):
+            value = data.get(field)
+            data[field] = (
+                None
+                if value is None
+                else _stats_number(value, field, integer=field != "time_weighted_mean")
+            )
+        for field in ("valid_samples", "covered_seconds", "covered_fraction"):
+            data[field] = _stats_number(
+                data.get(field), field, integer=field == "valid_samples"
+            )
+        if data["covered_fraction"] > 1:
+            raise FabricConfigError("covered fraction must not exceed one")
+        return data
+
+
+class SampleSummary(FabricMapping):
+    """Retained native series, reductions, and collection-quality diagnostics."""
+
+    target_interval_ms: int
+    max_samples: int
+    sample_count: int
+    dropped_samples: int
+    largest_gap_seconds: float
+    collection_seconds: float
+    truncated: bool
+    diagnostics: Sequence[str]
+    samples: ArtifactRef | None
+    cgroup_target_continuous: bool
+    resident_memory_bytes: GaugeSummary
+    process_count: GaugeSummary
+    cpu_time_seconds_estimate: Measurement
+    cpu_percent_one_core: Measurement
+    _fields = frozenset(
+        {
+            "target_interval_ms",
+            "max_samples",
+            "sample_count",
+            "dropped_samples",
+            "largest_gap_seconds",
+            "collection_seconds",
+            "truncated",
+            "diagnostics",
+            "samples",
+            "cgroup_target_continuous",
+            "resident_memory_bytes",
+            "process_count",
+            "cpu_time_seconds_estimate",
+            "cpu_percent_one_core",
+        }
+    )
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        for field in (
+            "target_interval_ms",
+            "max_samples",
+            "sample_count",
+            "dropped_samples",
+            "largest_gap_seconds",
+            "collection_seconds",
+        ):
+            data[field] = _stats_number(
+                data.get(field),
+                field,
+                integer=field not in ("largest_gap_seconds", "collection_seconds"),
+            )
+        data["cgroup_target_continuous"] = _boolean(
+            data.get("cgroup_target_continuous"), "cgroup target continuity"
+        )
+        data["truncated"] = _boolean(data.get("truncated"), "truncated")
+        data["diagnostics"] = tuple(
+            _required_text(value, "diagnostic code")
+            for value in data.get("diagnostics", [])
+        )
+        data["samples"] = (
+            None
+            if data.get("samples") is None
+            else ArtifactRef.from_mapping(data["samples"])
+        )
+        for field in ("resident_memory_bytes", "process_count"):
+            data[field] = GaugeSummary.from_mapping(data.get(field))
+        for field in ("cpu_time_seconds_estimate", "cpu_percent_one_core"):
+            data[field] = _stats_measurement(data.get(field), integer=False)
+        return data
+
+
 class InvocationSystemStats(FabricMapping):
     """System measurements for one invocation in its executing runner.
 
@@ -2106,16 +2432,27 @@ class InvocationSystemStats(FabricMapping):
             endpoint collection, artifact preparation, and teardown.
         before: Observation immediately before the adapter exchange.
         after: Observation immediately after the exchange, under the same lock.
+        cgroup: Native adapter-host cgroup readings and counter deltas, or None.
+        sampled: Optional retained series, gauge reductions, and collection quality.
         cpu_time_seconds_estimate: Nonnegative CPU counter difference, or None
             if an endpoint is missing, identities differ, or the counter fell.
             Process reaping and reparenting can make this underestimate work.
     """
 
+    cgroup: CgroupStats | None
+    sampled: SampleSummary | None
     elapsed_seconds: float
     before: ResourceObservation
     after: ResourceObservation
     _fields = frozenset(
-        {"elapsed_seconds", "before", "after", "cpu_time_seconds_estimate"}
+        {
+            "elapsed_seconds",
+            "before",
+            "after",
+            "cpu_time_seconds_estimate",
+            "cgroup",
+            "sampled",
+        }
     )
 
     @property
@@ -2125,6 +2462,16 @@ class InvocationSystemStats(FabricMapping):
 
     @classmethod
     def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        data["cgroup"] = (
+            None
+            if data.get("cgroup") is None
+            else CgroupStats.from_mapping(data["cgroup"])
+        )
+        data["sampled"] = (
+            None
+            if data.get("sampled") is None
+            else SampleSummary.from_mapping(data["sampled"])
+        )
         data["before"] = ResourceObservation.from_mapping(data.get("before"))
         data["after"] = ResourceObservation.from_mapping(data.get("after"))
         for field in ("elapsed_seconds", "cpu_time_seconds_estimate"):

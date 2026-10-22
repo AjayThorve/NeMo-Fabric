@@ -46,6 +46,7 @@ MODULE_SLUGS = {
     ),
     "nemo_fabric.models": "/reference/api/python-library-reference/models",
     "nemo_fabric.types": "/reference/api/python-library-reference/types",
+    "nemo_fabric.stats": "/reference/api/python-library-reference/stats",
     "nemo_fabric.errors": "/reference/api/python-library-reference/errors",
 }
 MEMBER_SIGNATURE = re.compile(
@@ -149,7 +150,12 @@ def _documented_method_names(exported_class: type[object]) -> list[str]:
 
 def test_python_reference_exactly_covers_exported_sdk_classes() -> None:
     exports = _exported_classes_by_module()
-    expected_pages = {f"{module}.md" for module in exports}
+    function_modules = {
+        getattr(nemo_fabric, name).__module__
+        for name in nemo_fabric.__all__
+        if isfunction(getattr(nemo_fabric, name))
+    }
+    expected_pages = {f"{module}.md" for module in exports.keys() | function_modules}
     actual_pages = {page.name for page in REFERENCE_DIR.glob("nemo_fabric.*.md")}
 
     assert actual_pages == expected_pages
@@ -247,6 +253,25 @@ def test_generated_signatures_preserve_python_callable_semantics():
 
     assert signature_count > 0
     assert async_count > 0
+
+
+def test_generated_function_signatures_preserve_python_callable_semantics():
+    for name in nemo_fabric.__all__:
+        function = getattr(nemo_fabric, name)
+        if not isfunction(function):
+            continue
+        page = REFERENCE_DIR / f"{function.__module__}.md"
+        match = re.search(
+            rf"^## <kbd>function</kbd> `{re.escape(name)}`\n\n"
+            r"```python\n(.*?)\n```",
+            page.read_text(encoding="utf-8"),
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        assert match is not None, name
+        prefix = "async def " if iscoroutinefunction(function) else "def "
+        assert _definition_ast(match.group(1)) == _definition_ast(
+            f"{prefix}{name}{signature(function)}"
+        )
 
 
 def test_generated_reference_documents_pydantic_field_contracts():

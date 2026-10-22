@@ -1371,6 +1371,17 @@
           ],
           "description": "Skill capability configuration."
         },
+        "system_stats": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SystemStatsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional bounded system resource sampling, independent of telemetry."
+        },
         "telemetry": {
           "anyOf": [
             {
@@ -2794,6 +2805,29 @@
             "type": "string"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SystemStatsConfig": {
+      "additionalProperties": false,
+      "description": "Opt-in, bounded periodic collection. Endpoint readings remain available\nwithout this configuration and without Relay or invocation recording.",
+      "properties": {
+        "max_samples": {
+          "default": 10000,
+          "description": "Maximum retained readings, including both endpoints. Intermediate\nreadings are dropped at this bound; the final reading is preserved.",
+          "format": "uint32",
+          "maximum": 100000,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "sample_interval_ms": {
+          "default": 1000,
+          "description": "Target sample cadence, in milliseconds. Actual cadence is reported.",
+          "format": "uint32",
+          "maximum": 60000,
+          "minimum": 100,
+          "type": "integer"
         }
       },
       "type": "object"

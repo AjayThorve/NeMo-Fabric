@@ -59,7 +59,10 @@ pub use runtime::{
 pub use schema::{
     SchemaName, generate_all_schemas, generate_schema, generate_schema_json, write_schema_snapshots,
 };
-pub use system_stats::{InvocationSystemStats, ResourceObservation};
+pub use system_stats::{
+    CgroupObservation, CgroupSnapshot, CgroupStats, GaugeSummary, InvocationSystemStats,
+    Measurement, ResourceObservation, SampleSummary, SystemStatsConfig,
+};
 
 /// Returns the crate version compiled into this build.
 pub fn version() -> &'static str {

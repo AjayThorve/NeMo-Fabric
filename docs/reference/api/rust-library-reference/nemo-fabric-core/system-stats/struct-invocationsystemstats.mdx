@@ -2,17 +2,17 @@
 title: "Struct Invocation System Stats"
 sidebar-title: "InvocationSystemStats"
 slug: "/reference/api/rust-library-reference/nemo-fabric-core/system_stats/struct-invocationsystemstats"
-description: "System measurements around one invocation, collected inside the executing runner. Resource observations cover its adapter host process tree, excluding the orchestrator, other workloads, and remote model/service processes."
-position: 1
+description: "System measurements around one invocation, collected inside the executing runner. Process-tree observations cover its adapter host and descendants, excluding the orchestrator and remote model/service processes. The separate cgroup observations may include other workloads in the same cgroup."
+position: 7
 ---
 {/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0 */}
 
 Generated from `cargo doc --no-deps -p nemo-fabric-core`.
 
-<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "pub struct InvocationSystemStats &#123;\n    pub elapsed_seconds: <a href=\"https://doc.rust-lang.org/1.94.0/std/primitive.f64.html\">f64</a>,\n    pub before: <a href=\"enum-resourceobservation.mdx\">ResourceObservation</a>,\n    pub after: <a href=\"enum-resourceobservation.mdx\">ResourceObservation</a>,\n    pub cpu_time_seconds_estimate: <a href=\"https://doc.rust-lang.org/1.94.0/core/option/enum.Option.html\">Option</a>&lt;<a href=\"https://doc.rust-lang.org/1.94.0/std/primitive.f64.html\">f64</a>&gt;,\n&#125;"}} /></pre>
+<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "pub struct InvocationSystemStats &#123;\n    pub elapsed_seconds: <a href=\"https://doc.rust-lang.org/1.94.0/std/primitive.f64.html\">f64</a>,\n    pub before: <a href=\"enum-resourceobservation.mdx\">ResourceObservation</a>,\n    pub after: <a href=\"enum-resourceobservation.mdx\">ResourceObservation</a>,\n    pub cpu_time_seconds_estimate: <a href=\"https://doc.rust-lang.org/1.94.0/core/option/enum.Option.html\">Option</a>&lt;<a href=\"https://doc.rust-lang.org/1.94.0/std/primitive.f64.html\">f64</a>&gt;,\n    pub cgroup: <a href=\"https://doc.rust-lang.org/1.94.0/core/option/enum.Option.html\">Option</a>&lt;<a href=\"struct-cgroupstats.mdx\">CgroupStats</a>&gt;,\n    pub sampled: <a href=\"https://doc.rust-lang.org/1.94.0/core/option/enum.Option.html\">Option</a>&lt;<a href=\"struct-samplesummary.mdx\">SampleSummary</a>&gt;,\n&#125;"}} /></pre>
 
-System measurements around one invocation, collected inside the executing runner. Resource observations cover its adapter host process tree, excluding the orchestrator, other workloads, and remote model/service processes.
+System measurements around one invocation, collected inside the executing runner. Process-tree observations cover its adapter host and descendants, excluding the orchestrator and remote model/service processes. The separate cgroup observations may include other workloads in the same cgroup.
 
 Endpoints are instantaneous readings, not peaks or time averages. CPU time is cumulative since runtime startup; its difference is only an estimate because process reaping and reparenting can change which work is visible.
 
@@ -20,7 +20,7 @@ Endpoints are instantaneous readings, not peaks or time averages. CPU time is cu
 
 ### `elapsed_seconds: f64`
 
-Monotonic elapsed seconds for the adapter exchange. Excludes runtime startup, resource collection, artifact preparation, and teardown.
+Monotonic elapsed seconds for the adapter exchange. Excludes runtime startup, endpoint collection, artifact preparation, and teardown. Optional sampling runs concurrently; its effect is not subtracted.
 
 ### `before: ResourceObservation`
 
@@ -33,6 +33,14 @@ Observation immediately after the adapter exchange, before another invocation ca
 ### `cpu_time_seconds_estimate: Option<f64>`
 
 Nonnegative CPU counter difference, in seconds. Absent if an endpoint is missing, the runtime identity differs, or its CPU counter decreased. It can undercount work whose processes leave the tree between reads.
+
+### `cgroup: Option<CgroupStats>`
+
+Before/after readings for the adapter host's cgroup. This scope may contain other workloads and overlaps the process tree; never add them.
+
+### `sampled: Option<SampleSummary>`
+
+Bounded sample reductions and collection quality when sampling is enabled.
 
 ## Trait Implementations
 

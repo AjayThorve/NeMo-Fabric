@@ -18,6 +18,7 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`nemo_fabric.openai_streaming`](./nemo_fabric.openai_streaming.md#module-nemo_fabricopenai_streaming): Adapter-native OpenAI streaming for the NVIDIA NeMo Fabric Python SDK.
 - [`nemo_fabric.models`](./nemo_fabric.models.md#module-nemo_fabricmodels): Pydantic SDK models for NVIDIA NeMo Fabric configuration and requests.
 - [`nemo_fabric.types`](./nemo_fabric.types.md#module-nemo_fabrictypes): Public data contracts for the NeMo Fabric Python SDK.
+- [`nemo_fabric.stats`](./nemo_fabric.stats.md#module-nemo_fabricstats): Read native resource series and select an invocation or trajectory window.
 - [`nemo_fabric.errors`](./nemo_fabric.errors.md#module-nemo_fabricerrors): Public exception hierarchy for the NeMo Fabric Python SDK.
 
 ## Classes
@@ -57,6 +58,7 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`models.RunRequest`](./nemo_fabric.models.md#class-runrequest): One validated NeMo Fabric invocation request.
 - [`models.RuntimeConfig`](./nemo_fabric.models.md#class-runtimeconfig): Invocation runtime contract.
 - [`models.SkillConfig`](./nemo_fabric.models.md#class-skillconfig): Skill capability configuration.
+- [`models.SystemStatsConfig`](./nemo_fabric.models.md#class-systemstatsconfig): Bounded native resource sampling, independent of Relay and recording.
 - [`models.TelemetryConfig`](./nemo_fabric.models.md#class-telemetryconfig): Telemetry configuration.
 - [`models.TelemetryProviderConfig`](./nemo_fabric.models.md#class-telemetryproviderconfig): Provider-specific telemetry configuration.
 - [`models.ToolDefinitionConfig`](./nemo_fabric.models.md#class-tooldefinitionconfig): One named normalized tool or tool-group definition.
@@ -65,13 +67,18 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`types.AdapterInfo`](./nemo_fabric.types.md#class-adapterinfo): Resolved adapter identity attached to a run plan.
 - [`types.ArtifactManifest`](./nemo_fabric.types.md#class-artifactmanifest): Normalized collection of artifacts produced by a run.
 - [`types.ArtifactRef`](./nemo_fabric.types.md#class-artifactref): Reference to one artifact produced by a run.
+- [`types.CgroupObservation`](./nemo_fabric.types.md#class-cgroupobservation): Native cgroup snapshot or explicit unavailable/unsupported reason.
+- [`types.CgroupSnapshot`](./nemo_fabric.types.md#class-cgroupsnapshot): Native adapter-host cgroup measurements, separate from process RSS.
+- [`types.CgroupStats`](./nemo_fabric.types.md#class-cgroupstats): Cgroup endpoint observations and counter deltas over an invocation.
 - [`types.DoctorCheck`](./nemo_fabric.types.md#class-doctorcheck): One diagnostic check in a ``DoctorReport``.
 - [`types.DoctorReport`](./nemo_fabric.types.md#class-doctorreport): Aggregate preflight diagnostics for a resolved run plan.
 - [`types.EnvironmentHandle`](./nemo_fabric.types.md#class-environmenthandle): Durable identity and provider binding for a prepared or attached environment.
 - [`types.EnvironmentReference`](./nemo_fabric.types.md#class-environmentreference): Provider-specific identity for an existing execution environment.
 - [`types.ErrorInfo`](./nemo_fabric.types.md#class-errorinfo): Structured failure returned inside a normalized ``RunResult``.
 - [`types.FabricEvent`](./nemo_fabric.types.md#class-fabricevent): One normalized lifecycle or invocation event.
+- [`types.GaugeSummary`](./nemo_fabric.types.md#class-gaugesummary): Sampled gauge extrema, hold-last-value mean, and covered time.
 - [`types.InvocationSystemStats`](./nemo_fabric.types.md#class-invocationsystemstats): System measurements for one invocation in its executing runner.
+- [`types.Measurement`](./nemo_fabric.types.md#class-measurement): Measured numeric value, an unlimited limit, or explicit missing evidence.
 - [`types.ResourceObservation`](./nemo_fabric.types.md#class-resourceobservation): Adapter host process-tree reading, or an explicit collection failure.
 - [`types.RunOutput`](./nemo_fabric.types.md#class-runoutput): Normalized adapter output.
 - [`types.RunPlan`](./nemo_fabric.types.md#class-runplan): Immutable execution plan produced before a runtime is started.
@@ -80,6 +87,7 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`types.RuntimeCapabilities`](./nemo_fabric.types.md#class-runtimecapabilities): Operations declared by the resolved runtime and adapter.
 - [`types.RuntimeHandle`](./nemo_fabric.types.md#class-runtimehandle): Opaque identity and binding for one started runtime.
 - [`types.RuntimeResourceSnapshot`](./nemo_fabric.types.md#class-runtimeresourcesnapshot): Timestamped resource usage of one runtime's local adapter host process tree.
+- [`types.SampleSummary`](./nemo_fabric.types.md#class-samplesummary): Retained native series, reductions, and collection-quality diagnostics.
 - [`types.ServiceHandle`](./nemo_fabric.types.md#class-servicehandle): Opaque identity and binding for one prepared or attached service.
 - [`types.ServiceReference`](./nemo_fabric.types.md#class-servicereference): Reference to an already-running caller-owned service.
 - [`types.TelemetryRef`](./nemo_fabric.types.md#class-telemetryref): Reference to external or persisted telemetry for a run.
@@ -95,6 +103,7 @@ SPDX-License-Identifier: Apache-2.0 -->
 ## Functions
 
 - [`capabilities.inspect_adapter`](./nemo_fabric.capabilities.md#function-inspect_adapter): Inspect a standalone runtime using descriptor metadata without loading its SDK.
+- [`stats.summarize_system_stats`](./nemo_fabric.stats.md#function-summarize_system_stats): Reduce a retained native JSONL series over a selected monotonic window.
 
 
 ---

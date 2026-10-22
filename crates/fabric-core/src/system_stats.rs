@@ -9,6 +9,70 @@ use serde::{Deserialize, Serialize};
 use crate::error::{FabricError, Result};
 use crate::resource_snapshot::RuntimeResourceSnapshot;
 
+pub mod cgroup;
+mod sampling;
+
+pub use cgroup::{CgroupObservation, CgroupSnapshot, Measurement};
+pub use sampling::{GaugeSummary, SampleSummary};
+pub(crate) use sampling::{StatsSession, SystemReader};
+
+/// Opt-in, bounded periodic collection. Endpoint readings remain available
+/// without this configuration and without Relay or invocation recording.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SystemStatsConfig {
+    /// Target sample cadence, in milliseconds. Actual cadence is reported.
+    #[serde(default = "default_interval")]
+    #[schemars(range(min = 100, max = 60000))]
+    pub sample_interval_ms: u32,
+    /// Maximum retained readings, including both endpoints. Intermediate
+    /// readings are dropped at this bound; the final reading is preserved.
+    #[serde(default = "default_max_samples")]
+    #[schemars(range(min = 2, max = 100000))]
+    pub max_samples: u32,
+}
+
+fn default_interval() -> u32 {
+    1000
+}
+fn default_max_samples() -> u32 {
+    10000
+}
+
+impl Default for SystemStatsConfig {
+    fn default() -> Self {
+        Self {
+            sample_interval_ms: default_interval(),
+            max_samples: default_max_samples(),
+        }
+    }
+}
+
+impl SystemStatsConfig {
+    pub(crate) fn validate(&self) -> Result<()> {
+        for (field, valid, reason) in [
+            (
+                "sample_interval_ms",
+                (100..=60000).contains(&self.sample_interval_ms),
+                "must be between 100 and 60000",
+            ),
+            (
+                "max_samples",
+                (2..=100000).contains(&self.max_samples),
+                "must be between 2 and 100000",
+            ),
+        ] {
+            if !valid {
+                return Err(FabricError::InvalidConfig {
+                    field: format!("system_stats.{field}"),
+                    reason: reason.into(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One attempt to observe the adapter host process tree. Missing readings are
 /// explicit; an unavailable observation never stands for zero resource usage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -56,8 +120,9 @@ impl ResourceObservation {
 }
 
 /// System measurements around one invocation, collected inside the executing
-/// runner. Resource observations cover its adapter host process tree, excluding
-/// the orchestrator, other workloads, and remote model/service processes.
+/// runner. Process-tree observations cover its adapter host and descendants,
+/// excluding the orchestrator and remote model/service processes. The separate
+/// cgroup observations may include other workloads in the same cgroup.
 ///
 /// Endpoints are instantaneous readings, not peaks or time averages. CPU time
 /// is cumulative since runtime startup; its difference is only an estimate
@@ -65,7 +130,8 @@ impl ResourceObservation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct InvocationSystemStats {
     /// Monotonic elapsed seconds for the adapter exchange. Excludes runtime
-    /// startup, resource collection, artifact preparation, and teardown.
+    /// startup, endpoint collection, artifact preparation, and teardown.
+    /// Optional sampling runs concurrently; its effect is not subtracted.
     #[schemars(range(min = 0.0))]
     pub elapsed_seconds: f64,
     /// Observation immediately before the adapter exchange.
@@ -79,6 +145,77 @@ pub struct InvocationSystemStats {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0))]
     pub cpu_time_seconds_estimate: Option<f64>,
+    /// Before/after readings for the adapter host's cgroup. This scope may
+    /// contain other workloads and overlaps the process tree; never add them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgroup: Option<CgroupStats>,
+    /// Bounded sample reductions and collection quality when sampling is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampled: Option<SampleSummary>,
+}
+
+/// Native cgroup observations and counter deltas over an invocation. Values
+/// identify the adapter host's cgroup, without claiming container exclusivity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CgroupStats {
+    /// Reading immediately before invocation.
+    pub before: CgroupObservation,
+    /// Reading immediately after invocation.
+    pub after: CgroupObservation,
+    /// CPU usage delta in microseconds, or an explicit unknown reason.
+    pub cpu_usage_microseconds: Measurement<u64>,
+    /// CPU throttled time delta in microseconds, or an explicit unknown reason.
+    pub cpu_throttled_microseconds: Measurement<u64>,
+    /// OOM-kill counter delta, or an explicit unknown reason.
+    pub oom_kills: Measurement<u64>,
+}
+
+impl CgroupStats {
+    pub(crate) fn new(before: CgroupObservation, after: CgroupObservation) -> Self {
+        Self {
+            cpu_usage_microseconds: cgroup::delta(&before, &after, |s| &s.cpu_usage_microseconds),
+            cpu_throttled_microseconds: cgroup::delta(&before, &after, |s| {
+                &s.cpu_throttled_microseconds
+            }),
+            oom_kills: cgroup::delta(&before, &after, |s| &s.oom_kills),
+            before,
+            after,
+        }
+    }
+}
+
+pub(crate) fn persist_summary(
+    stats: &InvocationSystemStats,
+    ids: &crate::InvocationHandle,
+    home: &std::path::Path,
+) -> std::result::Result<crate::ArtifactRef, ()> {
+    use std::io::Write;
+    let temporary = home.join("system-stats-summary.json.tmp");
+    let path = home.join("system-stats-summary.json");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|_| ())?;
+    serde_json::to_writer_pretty(
+        &mut file,
+        &serde_json::json!({
+            "schema_version": "fabric.system_stats/v1alpha1",
+            "runtime_id": ids.runtime_id, "invocation_id": ids.invocation_id,
+            "request_id": ids.request_id, "system_stats": stats,
+        }),
+    )
+    .map_err(|_| ())?;
+    file.write_all(b"\n").map_err(|_| ())?;
+    drop(file);
+    std::fs::rename(&temporary, &path).map_err(|_| ())?;
+    Ok(crate::ArtifactRef {
+        name: "system_stats_summary".into(),
+        kind: "system_stats_summary".into(),
+        path,
+        media_type: Some("application/json".into()),
+        metadata: Default::default(),
+    })
 }
 
 impl InvocationSystemStats {
@@ -104,6 +241,8 @@ impl InvocationSystemStats {
             before,
             after,
             cpu_time_seconds_estimate,
+            cgroup: None,
+            sampled: None,
         }
     }
 }
