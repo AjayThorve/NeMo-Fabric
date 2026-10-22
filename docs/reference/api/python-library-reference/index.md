@@ -18,7 +18,6 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`nemo_fabric.openai_streaming`](./nemo_fabric.openai_streaming.md#module-nemo_fabricopenai_streaming): Adapter-native OpenAI streaming for the NVIDIA NeMo Fabric Python SDK.
 - [`nemo_fabric.models`](./nemo_fabric.models.md#module-nemo_fabricmodels): Pydantic SDK models for NVIDIA NeMo Fabric configuration and requests.
 - [`nemo_fabric.types`](./nemo_fabric.types.md#module-nemo_fabrictypes): Public data contracts for the NeMo Fabric Python SDK.
-- [`nemo_fabric.stats`](./nemo_fabric.stats.md#module-nemo_fabricstats): Read native resource series and select an invocation or trajectory window.
 - [`nemo_fabric.errors`](./nemo_fabric.errors.md#module-nemo_fabricerrors): Public exception hierarchy for the NeMo Fabric Python SDK.
 
 ## Classes
@@ -103,7 +102,6 @@ SPDX-License-Identifier: Apache-2.0 -->
 ## Functions
 
 - [`capabilities.inspect_adapter`](./nemo_fabric.capabilities.md#function-inspect_adapter): Inspect a standalone runtime using descriptor metadata without loading its SDK.
-- [`stats.summarize_system_stats`](./nemo_fabric.stats.md#function-summarize_system_stats): Reduce a retained native JSONL series over a selected monotonic window.
 
 
 ---

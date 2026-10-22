@@ -24,12 +24,10 @@ MODULE_NAMES = (
     "nemo_fabric.openai_streaming",
     "nemo_fabric.models",
     "nemo_fabric.types",
-    "nemo_fabric.stats",
     "nemo_fabric.errors",
 )
 CLASS_HEADING = re.compile(r"^## <kbd>class</kbd> `([^`]+)`$")
 MEMBER_HEADING = re.compile(r"^### <kbd>(?:method|classmethod)</kbd> `([^`]+)`$")
-FUNCTION_HEADING = re.compile(r"^## <kbd>function</kbd> `([^`]+)`$")
 
 
 def _annotation_text(annotation: Any) -> str:
@@ -129,16 +127,11 @@ def _replace_signature_fences(text: str, module: Any) -> str:
             class_name = class_match.group(1)
             pending_member = None
 
-        function_match = FUNCTION_HEADING.match(line)
-        if function_match:
-            class_name = None
-            pending_member = function_match.group(1)
-
         member_match = MEMBER_HEADING.match(line)
         if member_match:
             pending_member = member_match.group(1)
 
-        if line == "```python" and pending_member:
+        if line == "```python" and class_name and pending_member:
             closing = index + 1
             while closing < len(lines) and lines[closing] != "```":
                 closing += 1
@@ -147,8 +140,8 @@ def _replace_signature_fences(text: str, module: Any) -> str:
                     f"unterminated signature fence for {class_name}.{pending_member}"
                 )
 
-            owner = getattr(module, class_name) if class_name else module
-            member = getattr(owner, pending_member)
+            exported_class = getattr(module, class_name)
+            member = getattr(exported_class, pending_member)
             output.extend(
                 [
                     "```python",

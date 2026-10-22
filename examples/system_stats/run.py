@@ -10,7 +10,7 @@ import json
 import sys
 from pathlib import Path
 
-from nemo_fabric import Fabric, FabricConfig, RunResult, summarize_system_stats
+from nemo_fabric import Fabric, FabricConfig, RunResult
 
 
 async def main():
@@ -71,10 +71,7 @@ async def main():
         json.dumps(
             {
                 "result": str(path),
-                "window": summarize_system_stats(
-                    sampled.samples.path,
-                    target_interval_ms=sampled.target_interval_ms,
-                ),
+                "sampled": sampled.to_mapping(),
                 "cgroup": result.system_stats.cgroup.to_mapping(),
             },
             indent=2,

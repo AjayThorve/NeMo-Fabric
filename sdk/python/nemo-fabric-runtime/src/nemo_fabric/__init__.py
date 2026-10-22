@@ -53,7 +53,6 @@ from nemo_fabric.runtime import RuntimeStatus
 from nemo_fabric.service import Service
 from nemo_fabric.service import ServiceStatus
 from nemo_fabric.streaming import InvokeStream
-from nemo_fabric.stats import summarize_system_stats
 from nemo_fabric.types import AdapterInfo
 from nemo_fabric.types import ArtifactManifest
 from nemo_fabric.types import ArtifactRef
@@ -137,7 +136,6 @@ __all__ = [
     "GaugeSummary",
     "Measurement",
     "SampleSummary",
-    "summarize_system_stats",
     "InvocationSystemStats",
     "ResourceObservation",
     "RunResult",

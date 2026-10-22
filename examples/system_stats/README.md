@@ -16,7 +16,7 @@ just build-python
 .venv/bin/python examples/system_stats/run.py --output /tmp/fabric-stats-example
 ```
 
-Inspect `run-result.json`, its `system_stats.sampled` reductions, and the JSONL/summary paths in `artifacts`. Every sample retains runtime/invocation/request IDs. `sampled_peak` is a sampled maximum, not a true high-water mark. `summarize_system_stats` selects a trajectory interval and reports coverage and observed boundaries.
+Inspect `run-result.json`, its `system_stats.sampled` reductions, and the JSONL/summary paths in `artifacts`. Every sample retains runtime/invocation/request IDs. `sampled_peak` is a sampled maximum, not a true high-water mark. Retained offsets allow benchmark tooling to correlate samples with trajectory events.
 
 For real Linux cgroup constraints, build the development wheel from this checkout and run a bounded container:
 

@@ -30,7 +30,6 @@ PYTHONPATH="sdk/python/nemo-fabric-runtime/src" lazydocs \
   "nemo_fabric.openai_streaming" \
   "nemo_fabric.models" \
   "nemo_fabric.types" \
-  "nemo_fabric.stats" \
   "nemo_fabric.errors"
 
 # Normalize the lazydocs output for Fern:
@@ -119,11 +118,6 @@ add_frontmatter \
   "Types" \
   "Typed config, request, plan, result, artifact, telemetry, and runtime contracts." \
   "/reference/api/python-library-reference/types"
-add_frontmatter \
-  "$out/nemo_fabric.stats.md" \
-  "System Stats" \
-  "Reduce native resource samples over invocation or trajectory windows." \
-  "/reference/api/python-library-reference/stats"
 add_frontmatter \
   "$out/nemo_fabric.errors.md" \
   "Errors" \

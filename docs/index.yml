@@ -114,8 +114,6 @@ navigation:
                 path: ./reference/api/python-library-reference/nemo_fabric.models.md
               - page: Types
                 path: ./reference/api/python-library-reference/nemo_fabric.types.md
-              - page: System Stats
-                path: ./reference/api/python-library-reference/nemo_fabric.stats.md
               - page: Errors
                 path: ./reference/api/python-library-reference/nemo_fabric.errors.md
           # Auto-discovered from the generated rustdoc->MDX pages
