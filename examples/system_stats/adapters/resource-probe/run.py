@@ -48,6 +48,7 @@ time.sleep(0.8)
 """,
                 ],
                 check=True,
+                timeout=10,
             )
             response(
                 operation,

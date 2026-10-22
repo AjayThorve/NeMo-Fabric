@@ -17,6 +17,8 @@ RUN /opt/build/bin/maturin build --locked --compatibility linux --out /wheels
 FROM python:3.12-slim-trixie
 COPY --from=build /wheels/ /wheels/
 RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
-COPY examples/system_stats/ /example/
+RUN useradd --uid 10001 --user-group --create-home stats
+COPY --chown=stats:stats examples/system_stats/ /example/
+USER stats:stats
 WORKDIR /example
 ENTRYPOINT ["python", "/example/run.py"]

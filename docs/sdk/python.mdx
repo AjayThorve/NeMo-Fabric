@@ -822,8 +822,10 @@ if stats is not None:
     print(stats.elapsed_seconds, stats.cpu_time_seconds_estimate)
     if stats.after.status == "available":
         print(stats.after.snapshot.resident_memory_bytes)
-    else:
+    elif stats.after.status in {"unavailable", "unsupported"}:
         print(stats.after.status, stats.after.reason)
+    else:
+        print(stats.after.status)
 ```
 
 For example, a serialized `RunResult` contains this fragment. The IDs already associate the measurements with one invocation; no additional identity file is required.
@@ -866,7 +868,7 @@ The CPU estimate is 2.5 seconds for this invocation, excluding the warm runtime'
 
 For Harbor, these measurements come from the adapter host inside the task runner, even when a separate host selects the task and capabilities. Harbor's existing result JSON carries the new field without a new stats file. For a model team comparing identical configs, pair `usage` with these measurements: more tokens or tool calls can explain more agent work; similar work with longer elapsed time warrants investigating execution conditions. Endpoint observations alone miss intermediate peaks and cannot explain every source of latency. Enable sampled stats and inspect native cgroup evidence below; remote inference latency requires serving-side evidence.
 
-A failed read appears as `{"status": "unavailable", "reason": "..."}`; an unsupported provider or operating system uses `"unsupported"`. Collection failures preserve the adapter outcome, including a normalized failed result. Disabled collection, older results, and execution backends without collection have `system_stats=None`. Protocol failures and timeouts that raise without a `RunResult` still raise. When sampling is enabled, Fabric retains sample and summary artifacts where possible even if the adapter exchange fails. These measurements require neither NeMo Relay collection nor invocation recording.
+A failed read appears as `{"status": "unavailable", "reason": "..."}`; an unsupported provider or operating system uses `"unsupported"`. Collection failures preserve the adapter outcome, including a normalized failed result. Disabled collection, older results, and execution backends without collection have `system_stats=None`. Protocol failures and timeouts that raise without a `RunResult` still raise. When sampling is enabled, NeMo Fabric retains sample and summary artifacts where possible even if the adapter exchange fails. These measurements require neither NeMo Relay collection nor invocation recording.
 
 
 ### Sampled Peaks and Means
@@ -881,10 +883,14 @@ config.system_stats = SystemStatsConfig(
 )
 config.runtime.artifacts = "artifacts"
 result = await Fabric().run(config, input="Fix the failing test")
-sampled = result.system_stats.sampled
-print(sampled.resident_memory_bytes.sampled_peak)
-print(sampled.resident_memory_bytes.time_weighted_mean)
-print(sampled.resident_memory_bytes.covered_fraction)
+stats = result.system_stats
+sampled = None if stats is None else stats.sampled
+if sampled is not None:
+    rss = sampled.resident_memory_bytes
+    if rss is not None:
+        print(rss.sampled_peak, rss.time_weighted_mean, rss.covered_fraction)
+    if sampled.samples is not None:
+        print(sampled.samples.path)
 
 ```
 
@@ -892,7 +898,7 @@ The mean holds the preceding reading across adjacent valid observations and excl
 
 For readings **80 MiB → 400 MiB → 80 MiB** at 0, 1, and 2 seconds, the final value is 80 MiB, sampled peak is 400 MiB, range is 80–400 MiB, and hold-last-value mean is 240 MiB. A sampled maximum can miss brief spikes between observations. It is not a true high-water mark.
 
-Sampling uses one process-wide scheduler, retains both endpoints, and bounds intermediate retention with `max_samples`. The result exposes retained/dropped sample counts, collection time, largest gap, truncation, per-gauge covered time, diagnostics, and artifact references. Late samples are discarded after invocation closes. A full series preserves the final endpoint rather than silently reporting an old value as final. Counter resets, changed targets, missing observations, and long gaps invalidate affected sampled CPU estimates.
+Sampling uses one process-wide scheduler, retains both endpoints, and bounds intermediate retention with `max_samples`. The result exposes retained/dropped sample counts, collection time, largest gap, truncation, per-gauge covered time, diagnostics, and artifact references. Late samples are discarded after invocation closes. A full series preserves the final endpoint rather than silently reporting an old value as final. Counter resets, changed targets, missing observations, and long gaps invalidate affected sampled CPU estimates. Sampling does not replace endpoint-derived CPU or cgroup deltas; collection quality and continuity are reported under `sampled`.
 
 With an artifact root, the layout is:
 
@@ -910,7 +916,7 @@ Every sample and saved summary carries the existing runtime, invocation, and req
 
 On Linux cgroup v2, `result.system_stats.cgroup` contains before/after observations for the **adapter host's cgroup**, plus CPU-use, throttled-time, and OOM-kill deltas. Snapshots expose visible CPU/memory limits, container-accounted current memory, swap, provider memory high-water, and CPU/memory/I/O pressure totals. Individual missing measurements remain explicit; unsupported platforms do not substitute host-wide readings.
 
-This cgroup can contain the Fabric runner, the adapter tree, and other workloads. Its totals overlap process-tree totals and must not be added to them. Limits account for visible ancestors only; namespaces can hide additional restrictions. `memory_peak_bytes` covers cgroup lifetime or an external reset, not one invocation. The collector does not reset shared counters or write to cgroup control files.
+This cgroup can contain the NeMo Fabric runner, the adapter tree, and other workloads. Its totals overlap process-tree totals and must not be added to them. Limits account for visible ancestors only; namespaces can hide additional restrictions. `memory_peak_bytes` covers cgroup lifetime or an external reset, not one invocation. The collector does not reset shared counters or write to cgroup control files.
 
 Pair these observations with `usage` and reward: more tokens/tool calls can explain more agent work; similar work with throttled CPU and a lower visible limit suggests a constrained execution environment. These signals support investigation and do not establish causality. Remote inference-server GPU usage still requires serving-side telemetry.
 

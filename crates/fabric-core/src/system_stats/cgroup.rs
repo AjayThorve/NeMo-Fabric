@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Native, read-only cgroup v2 observations. The discovery checks extend the
-//! approach in Maryam Najafian's #426 cgroup reader; no Relay collector is used.
+//! Native, read-only cgroup v2 observations of the executing adapter host.
 //! A cgroup is a scope, not a claim of exclusive ownership by this invocation.
+
+// Discovery checks extend Maryam Najafian's reader in NVIDIA/NeMo-Fabric#426.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -497,6 +498,13 @@ pub(crate) fn delta(
     after: &CgroupObservation,
     field: fn(&CgroupSnapshot) -> &Measurement<u64>,
 ) -> Measurement<u64> {
+    for observation in [before, after] {
+        if let CgroupObservation::Unsupported { reason } = observation {
+            return Measurement::Unsupported {
+                reason: reason.clone(),
+            };
+        }
+    }
     if let Some((before, after)) = before.snapshot().zip(after.snapshot()) {
         if before.target != after.target {
             return Measurement::unavailable("cgroup target changed");
@@ -506,6 +514,11 @@ pub(crate) fn delta(
             (Measurement::NotCollected, Measurement::NotCollected)
         ) {
             return Measurement::NotCollected;
+        }
+        for measurement in [field(before), field(after)] {
+            if let Measurement::Unsupported { .. } = measurement {
+                return measurement.clone();
+            }
         }
         if let Some((before, after)) = field(before).value().zip(field(after).value()) {
             return after
@@ -520,6 +533,44 @@ pub(crate) fn delta(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsupported_observations_preserve_counter_availability() {
+        let unsupported = CgroupObservation::Unsupported {
+            reason: "no cgroup reader".into(),
+        };
+        let unavailable = CgroupObservation::Unavailable {
+            reason: "host exited".into(),
+        };
+        for (before, after) in [(&unsupported, &unavailable), (&unavailable, &unsupported)] {
+            assert_eq!(
+                delta(before, after, |s| &s.cpu_usage_microseconds),
+                Measurement::Unsupported {
+                    reason: "no cgroup reader".into()
+                }
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsupported_counter_sources_preserve_availability() {
+        let root = fixture("unsupported-counter");
+        let available = CgroupObservation::Available {
+            snapshot: read_host(&root, 42, &super::super::default_groups()).unwrap(),
+        };
+        std::fs::remove_file(root.join("sys/fs/cgroup/parent/child/cpu.stat")).unwrap();
+        let unsupported = CgroupObservation::Available {
+            snapshot: read_host(&root, 42, &super::super::default_groups()).unwrap(),
+        };
+        for (before, after) in [(&available, &unsupported), (&unsupported, &available)] {
+            assert!(matches!(
+                delta(before, after, |s| &s.cpu_usage_microseconds),
+                Measurement::Unsupported { .. }
+            ));
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn cpuset_ranges_are_counted_without_duplicates_or_unsafe_paths() {

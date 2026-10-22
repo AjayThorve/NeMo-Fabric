@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Invocation measurements collected by Fabric in the executing runtime.
+//! Invocation measurements collected by NeMo Fabric in the executing runtime.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

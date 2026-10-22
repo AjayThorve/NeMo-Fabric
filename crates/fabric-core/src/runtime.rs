@@ -2114,24 +2114,7 @@ fn run_local_host_invocation_with_timeout(
                     stats.cgroup = Some(cgroup);
                 }
                 if let Some(sampling) = &sampling {
-                    let summary = sampling.finish(elapsed_seconds, &after);
-                    stats.cpu_time_seconds_estimate =
-                        summary.cpu_time_seconds_estimate.value().copied();
-                    if !summary.cgroup_target_continuous {
-                        if let Some(cgroup) = &mut stats.cgroup {
-                            let unknown = crate::Measurement::Unavailable {
-                                reason: "sampled cgroup continuity is unavailable".into(),
-                            };
-                            if config.includes(crate::SystemStatsMetricGroup::CgroupCpu) {
-                                cgroup.cpu_usage_microseconds = unknown.clone();
-                                cgroup.cpu_throttled_microseconds = unknown.clone();
-                            }
-                            if config.includes(crate::SystemStatsMetricGroup::CgroupMemory) {
-                                cgroup.oom_kills = unknown;
-                            }
-                        }
-                    }
-                    stats.sampled = Some(summary);
+                    stats.sampled = Some(sampling.finish(elapsed_seconds, &after));
                 }
                 stats
             });
@@ -5346,7 +5329,31 @@ for line in sys.stdin:
         });
         let result = run_plan(&plan, RunRequest::text("bounded")).unwrap();
         let stats = result.system_stats.unwrap();
+        let before = stats.before.snapshot().unwrap();
+        let after = stats.after.snapshot().unwrap();
+        assert_eq!(
+            stats.cpu_time_seconds_estimate,
+            Some(after.cpu_time_seconds - before.cpu_time_seconds)
+        );
+        if let Some(cgroup) = &stats.cgroup
+            && let Some((before, after)) = cgroup.before.snapshot().zip(cgroup.after.snapshot())
+            && let Some((before, after)) = before
+                .cpu_usage_microseconds
+                .value()
+                .zip(after.cpu_usage_microseconds.value())
+        {
+            assert_eq!(
+                cgroup.cpu_usage_microseconds,
+                crate::Measurement::Available {
+                    value: after - before
+                }
+            );
+        }
         let summary = stats.sampled.unwrap();
+        assert!(matches!(
+            summary.cpu_time_seconds_estimate,
+            crate::Measurement::Unavailable { .. }
+        ));
         assert_eq!(summary.sample_count, 2);
         assert!(summary.dropped_samples > 0);
         assert!(summary.truncated);

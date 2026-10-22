@@ -25,7 +25,7 @@ For real Linux cgroup constraints, build the development wheel from this checkou
 ```bash
 docker build -f examples/system_stats/Dockerfile -t fabric-system-stats:dev .
 mkdir -p /tmp/fabric-stats-container
-docker run --rm --cpus=0.5 --memory=512m \
+docker run --rm --user "$(id -u):$(id -g)" --cpus=0.5 --memory=512m \
   -v /tmp/fabric-stats-container:/output \
   fabric-system-stats:dev --output /output
 ```
@@ -41,8 +41,8 @@ A qualification run with these limits retained 14 readings at a 100 ms target ca
 
 The same result reported a 0.5-core visible limit, a 512 MiB memory limit, an estimated 0.39 seconds of process-tree CPU, and a cgroup throttled-time delta of 0.62 seconds. Values vary by machine and execution conditions; these are measured example values, not expected outputs or performance guarantees.
 
-Add `--harbor-runner` to either command to exercise Fabric's existing task-side Harbor spec/result transport. The serialized result and referenced stats artifacts should retain the same invocation identity. This checks the runner hop; a full Harbor reward trial is separate qualification.
+Add `--harbor-runner` to either command to exercise NeMo Fabric's existing task-side Harbor spec/result transport. The serialized result and referenced stats artifacts should retain the same invocation identity. This checks the runner hop; a full Harbor reward trial is separate qualification.
 
-The Dockerfile builds current source into a development wheel. This is not registry-only release qualification; a released consumer must use a Fabric version containing these APIs.
+The Dockerfile builds current source into a development wheel. This is not registry-only release qualification; a released consumer must use a NeMo Fabric version containing these APIs.
 
-For a complete workload on a remote GPU machine, follow the [two-run benchmark qualification plan](BENCHMARKS.md). Retain both full passes and separate inference-server observations from Fabric's measured scopes.
+For a complete workload on a remote GPU machine, follow the [two-run benchmark qualification plan](BENCHMARKS.md). Retain both full passes and separate inference-server observations from NeMo Fabric's measured scopes.

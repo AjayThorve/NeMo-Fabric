@@ -8,15 +8,15 @@ SPDX-License-Identifier: Apache-2.0
 **Identical configs can produce different amounts of agent work and encounter different system conditions. Stats should help separate those two.**
 
 Start with a small, fixed selection of real Harbor Terminal-Bench tasks through
-the Fabric agent. Resolve the latest published dataset once and retain its
+the NVIDIA NeMo Fabric agent. Resolve the latest published dataset once and retain its
 immutable version and selected task identities. Cover different resource
 patterns where the dataset permits it: CPU-heavy work, temporary memory demand,
 and a longer tool sequence. Validate evidence and inspect representative
 trajectories before scaling to the full suite. Oracle runs can check task
-environments, but do not qualify Fabric's agent invocation collection.
+environments, but do not qualify NeMo Fabric's agent invocation collection.
 
 Run the complete selected benchmark twice with native system stats enabled.
-Use the same Fabric commit, task set, model weights, serving configuration,
+Use the same NeMo Fabric commit, task set, model weights, serving configuration,
 concurrency, resource limits, sampling settings, and supported random seeds.
 Record the warmup and cache policy before either pass; preserve it in both.
 Keep failures and timeouts in the report.
@@ -25,7 +25,7 @@ Before spending GPU time, install the exact PR build in the actual task-runner
 environment and run the credential-free resource probe there. Require resolved
 stats artifacts, matching invocation IDs, a retained transient peak, and explicit
 metric availability. A host-side package version alone does not establish which
-Fabric build or collector ran inside a task container.
+NeMo Fabric build or collector ran inside a task container.
 
 ## Evidence to retain
 
@@ -45,7 +45,7 @@ qualification/
 
 The manifest must record the actual host and task-runner environments separately,
 GPU allocation and driver details, model/server identity, collection settings,
-and the association between benchmark task IDs and Fabric invocation IDs.
+and the association between benchmark task IDs and NeMo Fabric invocation IDs.
 Do not put credentials or complete environment dumps in it. Preserve raw files
 before deriving tables; a summary without its source series is insufficient.
 
@@ -76,7 +76,7 @@ other processes; do not add its totals to overlapping process-tree measurements.
 
 An inference server outside that scope needs separate telemetry. GPU utilization,
 GPU memory, and server request/token measurements must identify their actual
-collector, server, device, and timestamps. They contextualize Fabric results;
+collector, server, device, and timestamps. They contextualize NeMo Fabric results;
 they are not native GPU metrics produced by this implementation. Shared GPU
 observations do not establish exclusive attribution to one invocation.
 
