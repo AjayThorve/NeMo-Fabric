@@ -2041,15 +2041,22 @@ fn run_local_host_invocation_with_timeout(
             }
         };
         let fabric_invocation = write_fabric_invocation(&fabric_home, &adapter_payload)?;
+        let stats_config = plan.config.system_stats.as_ref();
         let reader = SystemReader {
             runtime_id: runtime.runtime_id.clone(),
             host: local_host_processes().get(&runtime.runtime_id).cloned(),
             local: runtime.environment.provider == "local",
+            collect: stats_config
+                .map(|config| config.collect.clone())
+                .unwrap_or_default(),
         };
-        let before = reader.read();
-        let sampling = plan.config.system_stats.as_ref().map(|config| {
-            StatsSession::prepare(config, &invocation, reader.clone(), &before, &fabric_home)
-        });
+        let before = stats_config.map(|_| reader.read());
+        let sampling = stats_config
+            .and_then(|config| config.sampling.as_ref())
+            .zip(before.as_ref())
+            .map(|(config, before)| {
+                StatsSession::prepare(config, &invocation, reader.clone(), before, &fabric_home)
+            });
         let invocation_started = Instant::now();
         if let Some(sampling) = &sampling {
             sampling.start(invocation_started);
@@ -2068,46 +2075,73 @@ fn run_local_host_invocation_with_timeout(
         let elapsed_seconds = invocation_started.elapsed().as_secs_f64();
         // Endpoint collection and final artifact writes are outside elapsed time,
         // and still under the host lock to exclude the next invocation.
-        let after = reader.read();
-        let mut system_stats = InvocationSystemStats::new(
-            before.adapter_tree.clone(),
-            after.adapter_tree.clone(),
-            elapsed_seconds,
-        );
-        system_stats.cgroup = Some(CgroupStats::new(
-            before.cgroup.clone(),
-            after.cgroup.clone(),
-        ));
-        if let Some(sampling) = &sampling {
-            let summary = sampling.finish(elapsed_seconds, &after);
-            system_stats.cpu_time_seconds_estimate =
-                summary.cpu_time_seconds_estimate.value().copied();
-            if !summary.cgroup_target_continuous {
-                if let Some(cgroup) = &mut system_stats.cgroup {
-                    let unknown = crate::Measurement::Unavailable {
-                        reason: "sampled cgroup continuity is unavailable".into(),
-                    };
-                    cgroup.cpu_usage_microseconds = unknown.clone();
-                    cgroup.cpu_throttled_microseconds = unknown.clone();
-                    cgroup.oom_kills = unknown;
-                }
-            }
-            system_stats.sampled = Some(summary);
-        }
-        // Persist optional samples/summary even when the adapter protocol fails.
-        // Failure to persist measurements never replaces the adapter outcome.
-        let stats_summary = if sampling.is_some() {
-            Some(crate::system_stats::persist_summary(
-                &system_stats,
-                &invocation,
-                &fabric_home,
-            ))
+        let after = stats_config.map(|_| reader.read());
+        // Keep the independent final resource_snapshot contract even when the
+        // invocation stats block or its process group is disabled.
+        let resource_snapshot = if stats_config
+            .is_some_and(|config| config.includes(crate::SystemStatsMetricGroup::Process))
+        {
+            after
+                .as_ref()
+                .and_then(|reading| reading.adapter_tree.snapshot())
+                .cloned()
         } else {
-            None
+            local_runtime_resource_snapshot(runtime).ok()
         };
+        let system_stats = before
+            .zip(after)
+            .zip(stats_config)
+            .map(|((before, after), config)| {
+                let mut stats = InvocationSystemStats::new(
+                    before.adapter_tree,
+                    after.adapter_tree.clone(),
+                    elapsed_seconds,
+                );
+                stats.collected_groups = config.collect.clone();
+                if config
+                    .collect
+                    .iter()
+                    .any(|group| *group != crate::SystemStatsMetricGroup::Process)
+                {
+                    let mut cgroup = CgroupStats::new(before.cgroup, after.cgroup.clone());
+                    if !config.includes(crate::SystemStatsMetricGroup::CgroupCpu) {
+                        cgroup.cpu_usage_microseconds = crate::Measurement::NotCollected;
+                        cgroup.cpu_throttled_microseconds = crate::Measurement::NotCollected;
+                    }
+                    if !config.includes(crate::SystemStatsMetricGroup::CgroupMemory) {
+                        cgroup.oom_kills = crate::Measurement::NotCollected;
+                    }
+                    stats.cgroup = Some(cgroup);
+                }
+                if let Some(sampling) = &sampling {
+                    let summary = sampling.finish(elapsed_seconds, &after);
+                    stats.cpu_time_seconds_estimate =
+                        summary.cpu_time_seconds_estimate.value().copied();
+                    if !summary.cgroup_target_continuous {
+                        if let Some(cgroup) = &mut stats.cgroup {
+                            let unknown = crate::Measurement::Unavailable {
+                                reason: "sampled cgroup continuity is unavailable".into(),
+                            };
+                            if config.includes(crate::SystemStatsMetricGroup::CgroupCpu) {
+                                cgroup.cpu_usage_microseconds = unknown.clone();
+                                cgroup.cpu_throttled_microseconds = unknown.clone();
+                            }
+                            if config.includes(crate::SystemStatsMetricGroup::CgroupMemory) {
+                                cgroup.oom_kills = unknown;
+                            }
+                        }
+                    }
+                    stats.sampled = Some(summary);
+                }
+                stats
+            });
+        // Optional evidence never replaces the adapter's original outcome.
+        let stats_summary = system_stats
+            .as_ref()
+            .filter(|_| sampling.is_some())
+            .map(|stats| crate::system_stats::persist_summary(stats, &invocation, &fabric_home));
         match exchange {
             Ok(output) => {
-                let resource_snapshot = system_stats.after.snapshot().cloned();
                 let stderr = take_local_host_stderr(&mut host_guard);
                 Ok((
                     output,
@@ -2248,7 +2282,10 @@ fn run_local_host_invocation_with_timeout(
             "text/plain",
         )?;
     }
-    if let Some(sampled) = &system_stats.sampled {
+    if let Some(sampled) = system_stats
+        .as_ref()
+        .and_then(|stats| stats.sampled.as_ref())
+    {
         if let Some(samples) = &sampled.samples {
             artifacts.artifacts.push(samples.clone());
         }
@@ -2308,7 +2345,7 @@ fn run_local_host_invocation_with_timeout(
         error,
         usage: agent_result.usage.as_ref().map(run_usage),
         resource_snapshot,
-        system_stats: Some(system_stats),
+        system_stats,
         artifacts,
         telemetry: telemetry_ref(plan, relay_config.as_ref())
             .into_iter()
@@ -5181,16 +5218,85 @@ for line in sys.stdin:
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
+    fn disabling_invocation_stats_survives_serialization_and_preserves_final_snapshot() {
+        let (root, mut plan) = local_host_plan("echo");
+        assert!(plan.config.system_stats.is_some());
+        plan.config.system_stats = None;
+        let mapping = serde_json::to_value(&plan.config).unwrap();
+        assert!(mapping.get("system_stats").unwrap().is_null());
+        let decoded: crate::FabricConfig = serde_json::from_value(mapping.clone()).unwrap();
+        assert!(decoded.system_stats.is_none());
+        let mut omitted = mapping;
+        omitted.as_object_mut().unwrap().remove("system_stats");
+        let decoded: crate::FabricConfig = serde_json::from_value(omitted).unwrap();
+        assert_eq!(decoded.system_stats, Some(Default::default()));
+        let result = run_plan(&plan, RunRequest::text("disabled")).unwrap();
+        assert!(result.system_stats.is_none());
+        assert!(result.resource_snapshot.is_some());
+        assert!(
+            !result
+                .artifacts
+                .artifacts
+                .iter()
+                .any(|a| a.kind.starts_with("system_stats"))
+        );
+        let home = Path::new(result.metadata["fabric_home"].as_str().unwrap());
+        assert!(!home.join("system-stats.jsonl").exists());
+        assert!(!home.join("system-stats-summary.json").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn filtered_sampling_does_not_collect_unselected_process_or_memory_groups() {
+        let (root, mut plan) = local_host_plan("echo");
+        plan.config.system_stats = Some(crate::SystemStatsConfig {
+            collect: vec![crate::SystemStatsMetricGroup::CgroupCpu],
+            sampling: Some(Default::default()),
+        });
+        let result = run_plan(&plan, RunRequest::text("filtered")).unwrap();
+        let stats = result.system_stats.unwrap();
+        assert!(matches!(stats.before, ResourceObservation::NotCollected));
+        assert!(matches!(stats.after, ResourceObservation::NotCollected));
+        assert!(stats.cpu_time_seconds_estimate.is_none());
+        assert!(matches!(
+            stats.cgroup.unwrap().oom_kills,
+            crate::Measurement::NotCollected
+        ));
+        let sampled = stats.sampled.unwrap();
+        assert!(sampled.resident_memory_bytes.is_none());
+        assert!(sampled.process_count.is_none());
+        assert!(matches!(
+            sampled.cpu_time_seconds_estimate,
+            crate::Measurement::NotCollected
+        ));
+        let rows: Vec<Value> = fs::read_to_string(sampled.samples.unwrap().path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter()
+                .all(|row| row["adapter_tree"]["status"] == "not_collected")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
     fn sampled_stats_capture_transient_worker_memory_and_preserve_correlation() {
         let (root, mut plan) = local_host_plan("memory_spike");
         plan.config.system_stats = Some(crate::SystemStatsConfig {
-            sample_interval_ms: 100,
-            max_samples: 100,
+            sampling: Some(crate::SystemStatsSamplingConfig {
+                interval_ms: 100,
+                max_samples: 100,
+            }),
+            ..Default::default()
         });
         let result = run_plan(&plan, RunRequest::text("spike")).expect("run with sampling");
         let stats = result.system_stats.as_ref().unwrap();
         let summary = stats.sampled.as_ref().unwrap();
-        let gauge = &summary.resident_memory_bytes;
+        let gauge = summary.resident_memory_bytes.as_ref().unwrap();
         assert!(
             gauge.sampled_peak.unwrap()
                 > stats.after.snapshot().unwrap().resident_memory_bytes + 128 * 1024 * 1024,
@@ -5232,8 +5338,11 @@ for line in sys.stdin:
     fn sampled_stats_keep_final_endpoint_when_retention_is_full() {
         let (root, mut plan) = local_host_plan("busy");
         plan.config.system_stats = Some(crate::SystemStatsConfig {
-            sample_interval_ms: 100,
-            max_samples: 2,
+            sampling: Some(crate::SystemStatsSamplingConfig {
+                interval_ms: 100,
+                max_samples: 2,
+            }),
+            ..Default::default()
         });
         let result = run_plan(&plan, RunRequest::text("bounded")).unwrap();
         let stats = result.system_stats.unwrap();
@@ -5257,7 +5366,10 @@ for line in sys.stdin:
     #[test]
     fn protocol_failure_retains_sample_evidence_without_replacing_the_error() {
         let (root, mut plan) = local_host_plan("invoke_failure");
-        plan.config.system_stats = Some(crate::SystemStatsConfig::default());
+        plan.config.system_stats = Some(crate::SystemStatsConfig {
+            sampling: Some(Default::default()),
+            ..Default::default()
+        });
         let runtime = start_runtime(&plan).unwrap();
         let error = invoke_runtime(&plan, &runtime, RunRequest::text("fail")).unwrap_err();
         assert!(

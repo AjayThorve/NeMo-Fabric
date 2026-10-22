@@ -66,8 +66,8 @@ pub struct FabricConfig {
     /// Telemetry configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryConfig>,
-    /// Optional bounded system resource sampling, independent of telemetry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Invocation stats: omitted means all endpoint groups, explicit null disables.
+    #[serde(default = "crate::system_stats::default_system_stats")]
     pub system_stats: Option<crate::system_stats::SystemStatsConfig>,
     /// First-class NeMo Relay integration configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]

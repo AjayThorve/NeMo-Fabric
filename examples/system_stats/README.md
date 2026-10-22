@@ -16,6 +16,8 @@ just build-python
 .venv/bin/python examples/system_stats/run.py --output /tmp/fabric-stats-example
 ```
 
+The example enables all metric groups with `SystemStatsConfig(sampling=SystemStatsSamplingConfig(interval_ms=100, max_samples=1000))`. Omit `sampling` for endpoints only, set `collect=["process"]` for process-tree measurements only, or set `config.system_stats=None` to disable invocation stats. The separate final `resource_snapshot` is preserved.
+
 Inspect `run-result.json`, its `system_stats.sampled` reductions, and the JSONL/summary paths in `artifacts`. Every sample retains runtime/invocation/request IDs. `sampled_peak` is a sampled maximum, not a true high-water mark. Retained offsets allow benchmark tooling to correlate samples with trajectory events.
 
 For real Linux cgroup constraints, build the development wheel from this checkout and run a bounded container:

@@ -2,7 +2,7 @@
 title: "Struct System Stats Config"
 sidebar-title: "SystemStatsConfig"
 slug: "/reference/api/rust-library-reference/nemo-fabric-core/system_stats/struct-systemstatsconfig"
-description: "Opt-in, bounded periodic collection. Endpoint readings remain available without this configuration and without Relay or invocation recording."
+description: "Native invocation collection, independent of Relay and recording. Omitted configuration collects all supported groups at the endpoints. Explicit null disables invocation stats, preserving the existing final `resource_snapshot` contract. Periodic sampling is independently opt-in."
 position: 9
 ---
 {/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -10,19 +10,19 @@ SPDX-License-Identifier: Apache-2.0 */}
 
 Generated from `cargo doc --no-deps -p nemo-fabric-core`.
 
-<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "pub struct SystemStatsConfig &#123;\n    pub sample_interval_ms: <a href=\"https://doc.rust-lang.org/1.94.0/std/primitive.u32.html\">u32</a>,\n    pub max_samples: <a href=\"https://doc.rust-lang.org/1.94.0/std/primitive.u32.html\">u32</a>,\n&#125;"}} /></pre>
+<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "pub struct SystemStatsConfig &#123;\n    pub collect: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/vec/struct.Vec.html\">Vec</a>&lt;<a href=\"enum-systemstatsmetricgroup.mdx\">SystemStatsMetricGroup</a>&gt;,\n    pub sampling: <a href=\"https://doc.rust-lang.org/1.94.0/core/option/enum.Option.html\">Option</a>&lt;<a href=\"struct-systemstatssamplingconfig.mdx\">SystemStatsSamplingConfig</a>&gt;,\n&#125;"}} /></pre>
 
-Opt-in, bounded periodic collection. Endpoint readings remain available without this configuration and without Relay or invocation recording.
+Native invocation collection, independent of Relay and recording. Omitted configuration collects all supported groups at the endpoints. Explicit null disables invocation stats, preserving the existing final `resource_snapshot` contract. Periodic sampling is independently opt-in.
 
 ## Fields
 
-### `sample_interval_ms: u32`
+### `collect: Vec<SystemStatsMetricGroup>`
 
-Target sample cadence, in milliseconds. Actual cadence is reported.
+Groups to collect and persist. Omission selects all supported groups.
 
-### `max_samples: u32`
+### `sampling: Option<SystemStatsSamplingConfig>`
 
-Maximum retained readings, including both endpoints. Intermediate readings are dropped at this bound; the final reading is preserved.
+Optional bounded periodic collection; absence means endpoints only.
 
 ## Trait Implementations
 

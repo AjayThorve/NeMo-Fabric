@@ -86,6 +86,19 @@
       "description": "A cgroup reading, or why the correctly targeted scope was unavailable.",
       "oneOf": [
         {
+          "description": "All cgroup groups were explicitly excluded from collection.",
+          "properties": {
+            "status": {
+              "const": "not_collected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
           "description": "The adapter host's cgroup was located and read.",
           "properties": {
             "snapshot": {
@@ -453,6 +466,19 @@
           ],
           "description": "Before/after readings for the adapter host's cgroup. This scope may\ncontain other workloads and overlaps the process tree; never add them."
         },
+        "collected_groups": {
+          "default": [
+            "process",
+            "cgroup.cpu",
+            "cgroup.memory",
+            "cgroup.pressure"
+          ],
+          "description": "Requested groups, including selected groups unavailable on this platform.",
+          "items": {
+            "$ref": "#/$defs/SystemStatsMetricGroup"
+          },
+          "type": "array"
+        },
         "cpu_time_seconds_estimate": {
           "description": "Nonnegative CPU counter difference, in seconds. Absent if an endpoint\nis missing, the runtime identity differs, or its CPU counter decreased.\nIt can undercount work whose processes leave the tree between reads.",
           "format": "double",
@@ -490,6 +516,19 @@
     "Measurement": {
       "description": "A measured value or its availability. Unlimited is distinct from unknown\nand is used only for limits. No missing measurement is replaced with zero.",
       "oneOf": [
+        {
+          "description": "Its metric group was explicitly excluded from collection.",
+          "properties": {
+            "status": {
+              "const": "not_collected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
         {
           "description": "A value was read successfully.",
           "properties": {
@@ -564,6 +603,19 @@
       "description": "A measured value or its availability. Unlimited is distinct from unknown\nand is used only for limits. No missing measurement is replaced with zero.",
       "oneOf": [
         {
+          "description": "Its metric group was explicitly excluded from collection.",
+          "properties": {
+            "status": {
+              "const": "not_collected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
           "description": "A value was read successfully.",
           "properties": {
             "status": {
@@ -637,6 +689,19 @@
     "ResourceObservation": {
       "description": "One attempt to observe the adapter host process tree. Missing readings are\nexplicit; an unavailable observation never stands for zero resource usage.",
       "oneOf": [
+        {
+          "description": "The process group was explicitly excluded from collection.",
+          "properties": {
+            "status": {
+              "const": "not_collected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
         {
           "description": "The process tree was read successfully.",
           "properties": {
@@ -868,11 +933,25 @@
           "type": "integer"
         },
         "process_count": {
-          "$ref": "#/$defs/GaugeSummary",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GaugeSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "Adapter-host tree live-process-count reductions."
         },
         "resident_memory_bytes": {
-          "$ref": "#/$defs/GaugeSummary",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GaugeSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "Adapter-host tree resident-memory reductions."
         },
         "sample_count": {
@@ -913,12 +992,35 @@
         "truncated",
         "diagnostics",
         "cgroup_target_continuous",
-        "resident_memory_bytes",
-        "process_count",
         "cpu_time_seconds_estimate",
         "cpu_percent_one_core"
       ],
       "type": "object"
+    },
+    "SystemStatsMetricGroup": {
+      "description": "Resource groups supported by the native invocation collector.",
+      "oneOf": [
+        {
+          "const": "process",
+          "description": "Adapter host process-tree CPU, resident memory, and process count.",
+          "type": "string"
+        },
+        {
+          "const": "cgroup.cpu",
+          "description": "Cgroup CPU capacity, usage, and throttling.",
+          "type": "string"
+        },
+        {
+          "const": "cgroup.memory",
+          "description": "Cgroup memory capacity, usage, swap, and OOM kills.",
+          "type": "string"
+        },
+        {
+          "const": "cgroup.pressure",
+          "description": "Cgroup CPU, memory, and I/O pressure counters.",
+          "type": "string"
+        }
+      ]
     },
     "TelemetryRef": {
       "description": "Reference to telemetry emitted by Relay or another configured telemetry path.",

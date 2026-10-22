@@ -33,7 +33,7 @@ async def main():
             },
             "discovery": {"local_paths": ["adapters"]},
             "runtime": {"artifacts": str(root / "artifacts")},
-            "system_stats": {"sample_interval_ms": 100, "max_samples": 1000},
+            "system_stats": {"sampling": {"interval_ms": 100, "max_samples": 1000}},
         }
     )
     path = root / "run-result.json"
@@ -66,13 +66,16 @@ async def main():
             config, base_dir=Path(__file__).parent, input="memory spike"
         )
         path.write_text(json.dumps(result.to_mapping(), indent=2) + "\n")
-    sampled = result.system_stats.sampled
+    stats = result.system_stats
+    if stats is None or stats.sampled is None:
+        raise RuntimeError(f"no sampled system stats in {path}; status={result.status}")
+    sampled = stats.sampled
     print(
         json.dumps(
             {
                 "result": str(path),
                 "sampled": sampled.to_mapping(),
-                "cgroup": result.system_stats.cgroup.to_mapping(),
+                "cgroup": None if stats.cgroup is None else stats.cgroup.to_mapping(),
             },
             indent=2,
         )

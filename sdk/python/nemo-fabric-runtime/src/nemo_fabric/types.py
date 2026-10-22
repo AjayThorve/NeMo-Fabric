@@ -28,6 +28,7 @@ JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
 _T = TypeVar("_T")
 _UINT64_MAX = (1 << 64) - 1
+_DEFAULT_SYSTEM_STATS: Mapping[str, Any] = MappingProxyType({})
 
 
 def _plain(value: Any) -> Any:
@@ -992,7 +993,7 @@ class _FabricConfigSnapshot(_ConfigMapping):
         skills: Mapping[str, Any] | None = None,
         telemetry: Mapping[str, Any] | None = None,
         relay: Mapping[str, Any] | None = None,
-        system_stats: Mapping[str, Any] | None = None,
+        system_stats: Mapping[str, Any] | None = _DEFAULT_SYSTEM_STATS,
         tools: Mapping[str, Any] | None = None,
         extra_fields: Mapping[str, Any] | None = None,
     ) -> None:
@@ -1050,6 +1051,7 @@ class _FabricConfigSnapshot(_ConfigMapping):
             "metadata": metadata_value,
             "runtime": runtime_value,
             "models": _mapping({} if models is None else models, "models"),
+            "system_stats": stats_value,
         }
         for key, item in (
             ("harness", harness_value),
@@ -1096,7 +1098,7 @@ class _FabricConfigSnapshot(_ConfigMapping):
             instructions=data.get("instructions"),
             mcp=data.get("mcp"),
             skills=data.get("skills"),
-            system_stats=data.get("system_stats"),
+            system_stats=data.get("system_stats", _DEFAULT_SYSTEM_STATS),
             telemetry=data.get("telemetry"),
             relay=data.get("relay"),
             tools=data.get("tools"),
@@ -2068,7 +2070,7 @@ class ResourceObservation(FabricMapping):
     """Adapter host process-tree reading, or an explicit collection failure.
 
     Attributes:
-        status: ``available``, ``unavailable``, or ``unsupported``.
+        status: ``available``, ``unavailable``, ``unsupported``, or ``not_collected``.
         snapshot: Present only when available; a ``RuntimeResourceSnapshot``.
         reason: Present only when unavailable or unsupported.
     """
@@ -2095,13 +2097,18 @@ class ResourceObservation(FabricMapping):
             data["snapshot"] = RuntimeResourceSnapshot.from_mapping(
                 data.get("snapshot")
             )
+        elif status == "not_collected":
+            if "snapshot" in data or "reason" in data:
+                raise FabricConfigError(
+                    "not-collected observation has no snapshot or reason"
+                )
         elif status in ("unavailable", "unsupported"):
             if "snapshot" in data:
                 raise FabricConfigError("missing observation cannot contain snapshot")
             data["reason"] = _required_text(data.get("reason"), "observation reason")
         else:
             raise FabricConfigError(
-                "observation status must be available, unavailable, or unsupported"
+                "observation status must be available, unavailable, unsupported, or not_collected"
             )
         return data
 
@@ -2126,7 +2133,7 @@ class Measurement(FabricMapping):
     """Measured numeric value, an unlimited limit, or explicit missing evidence.
 
     Attributes:
-        status: available, unlimited, unavailable, or unsupported.
+        status: available, unlimited, unavailable, unsupported, or not_collected.
         value: Numeric reading when available, otherwise None.
         reason: Collection failure/capability reason, otherwise None.
     """
@@ -2155,7 +2162,7 @@ class Measurement(FabricMapping):
             data["reason"] = _required_text(data.get("reason"), "measurement reason")
             if "value" in data:
                 raise FabricConfigError("missing measurement cannot contain value")
-        elif status == "unlimited":
+        elif status in ("unlimited", "not_collected"):
             if "reason" in data or "value" in data:
                 raise FabricConfigError("unlimited measurement has no value or reason")
         else:
@@ -2262,6 +2269,11 @@ class CgroupObservation(FabricMapping):
             if "reason" in data:
                 raise FabricConfigError("available observation cannot contain reason")
             data["snapshot"] = CgroupSnapshot.from_mapping(data.get("snapshot"))
+        elif data.get("status") == "not_collected":
+            if "snapshot" in data or "reason" in data:
+                raise FabricConfigError(
+                    "not-collected observation has no snapshot or reason"
+                )
         elif data.get("status") in ("unavailable", "unsupported"):
             if "snapshot" in data:
                 raise FabricConfigError("missing observation cannot contain snapshot")
@@ -2363,8 +2375,8 @@ class SampleSummary(FabricMapping):
     diagnostics: Sequence[str]
     samples: ArtifactRef | None
     cgroup_target_continuous: bool
-    resident_memory_bytes: GaugeSummary
-    process_count: GaugeSummary
+    resident_memory_bytes: GaugeSummary | None
+    process_count: GaugeSummary | None
     cpu_time_seconds_estimate: Measurement
     cpu_percent_one_core: Measurement
     _fields = frozenset(
@@ -2415,7 +2427,11 @@ class SampleSummary(FabricMapping):
             else ArtifactRef.from_mapping(data["samples"])
         )
         for field in ("resident_memory_bytes", "process_count"):
-            data[field] = GaugeSummary.from_mapping(data.get(field))
+            data[field] = (
+                None
+                if data.get(field) is None
+                else GaugeSummary.from_mapping(data[field])
+            )
         for field in ("cpu_time_seconds_estimate", "cpu_percent_one_core"):
             data[field] = _stats_measurement(data.get(field), integer=False)
         return data
@@ -2441,11 +2457,13 @@ class InvocationSystemStats(FabricMapping):
 
     cgroup: CgroupStats | None
     sampled: SampleSummary | None
+    collected_groups: Sequence[str]
     elapsed_seconds: float
     before: ResourceObservation
     after: ResourceObservation
     _fields = frozenset(
         {
+            "collected_groups",
             "elapsed_seconds",
             "before",
             "after",
@@ -2462,6 +2480,18 @@ class InvocationSystemStats(FabricMapping):
 
     @classmethod
     def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        supported = ("process", "cgroup.cpu", "cgroup.memory", "cgroup.pressure")
+        groups = data.get("collected_groups", supported)
+        if (
+            not isinstance(groups, (list, tuple))
+            or not groups
+            or any(g not in supported for g in groups)
+            or len(set(groups)) != len(groups)
+        ):
+            raise FabricConfigError(
+                "collected_groups must contain unique supported groups"
+            )
+        data["collected_groups"] = tuple(groups)
         data["cgroup"] = (
             None
             if data.get("cgroup") is None

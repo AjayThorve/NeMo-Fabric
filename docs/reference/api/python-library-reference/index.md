@@ -57,7 +57,8 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`models.RunRequest`](./nemo_fabric.models.md#class-runrequest): One validated NeMo Fabric invocation request.
 - [`models.RuntimeConfig`](./nemo_fabric.models.md#class-runtimeconfig): Invocation runtime contract.
 - [`models.SkillConfig`](./nemo_fabric.models.md#class-skillconfig): Skill capability configuration.
-- [`models.SystemStatsConfig`](./nemo_fabric.models.md#class-systemstatsconfig): Bounded native resource sampling, independent of Relay and recording.
+- [`models.SystemStatsConfig`](./nemo_fabric.models.md#class-systemstatsconfig): Native invocation stats selection, independent of Relay and recording.
+- [`models.SystemStatsSamplingConfig`](./nemo_fabric.models.md#class-systemstatssamplingconfig): Opt-in periodic collection; bounds include both endpoint samples.
 - [`models.TelemetryConfig`](./nemo_fabric.models.md#class-telemetryconfig): Telemetry configuration.
 - [`models.TelemetryProviderConfig`](./nemo_fabric.models.md#class-telemetryproviderconfig): Provider-specific telemetry configuration.
 - [`models.ToolDefinitionConfig`](./nemo_fabric.models.md#class-tooldefinitionconfig): One named normalized tool or tool-group definition.

@@ -14,6 +14,7 @@ use std::time::SystemTime;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::SystemStatsMetricGroup;
 use crate::resource_snapshot::LocalHostProcess;
 use crate::time::rfc3339_millis;
 
@@ -22,6 +23,8 @@ use crate::time::rfc3339_millis;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Measurement<T> {
+    /// Its metric group was explicitly excluded from collection.
+    NotCollected,
     /// A value was read successfully.
     Available {
         /// Observed numeric value, with units defined by its containing field.
@@ -98,6 +101,8 @@ pub struct CgroupSnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum CgroupObservation {
+    /// All cgroup groups were explicitly excluded from collection.
+    NotCollected,
     /// The adapter host's cgroup was located and read.
     Available {
         /// Snapshot of the resolved cgroup identity.
@@ -125,7 +130,14 @@ impl CgroupObservation {
     }
 }
 
-pub(crate) fn observe(host: Option<&LocalHostProcess>, local: bool) -> CgroupObservation {
+pub(crate) fn observe(
+    host: Option<&LocalHostProcess>,
+    local: bool,
+    groups: &[SystemStatsMetricGroup],
+) -> CgroupObservation {
+    if !groups.iter().any(|g| *g != SystemStatsMetricGroup::Process) {
+        return CgroupObservation::NotCollected;
+    }
     if !local || !cfg!(target_os = "linux") {
         return CgroupObservation::Unsupported {
             reason: "native cgroup v2 reader requires local Linux execution".into(),
@@ -136,7 +148,7 @@ pub(crate) fn observe(host: Option<&LocalHostProcess>, local: bool) -> CgroupObs
             reason: "adapter host is not active".into(),
         };
     };
-    match read_host(Path::new("/"), host.pid()) {
+    match read_host(Path::new("/"), host.pid(), groups) {
         Ok(snapshot) if host.is_current() => CgroupObservation::Available { snapshot },
         Ok(_) => CgroupObservation::Unavailable {
             reason: "adapter host changed during collection".into(),
@@ -284,16 +296,31 @@ fn cpus(text: &str) -> Result<u64, String> {
     Ok(total)
 }
 
-fn limits(directory: &Path, visible_root: &Path) -> (Measurement<f64>, Measurement<u64>) {
-    let mut cpu = read_text(&directory.join("cpuset.cpus.effective"), 16384)
-        .and_then(|text| cpus(&text))
-        .map(|count| count as f64);
+fn limits(
+    directory: &Path,
+    visible_root: &Path,
+    cpu_selected: bool,
+    memory_selected: bool,
+) -> (Measurement<f64>, Measurement<u64>) {
+    let mut cpu = Ok(None::<f64>);
+    let cpuset = directory.join("cpuset.cpus.effective");
+    if cpu_selected
+        && !matches!(std::fs::metadata(&cpuset), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
+        cpu = read_text(&cpuset, 16384)
+            .and_then(|text| cpus(&text))
+            .map(|count| Some(count as f64));
+    }
     let mut memory = Ok(None::<u64>);
     let mut current = directory;
     for depth in 0..64 {
         for (name, cpu_file) in [("cpu.max", true), ("memory.max", false)] {
+            if (cpu_file && !cpu_selected) || (!cpu_file && !memory_selected) {
+                continue;
+            }
             let file = current.join(name);
-            if current == visible_root && !file.exists() {
+            if matches!(std::fs::metadata(&file), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+            {
                 continue;
             }
             let result = read_text(&file, 4096);
@@ -318,7 +345,9 @@ fn limits(directory: &Path, visible_root: &Path) -> (Measurement<f64>, Measureme
                         .ok_or("invalid CPU quota")?;
                     Ok(Some(quota as f64 / period as f64))
                 }) {
-                    Ok(Some(quota)) => cpu = cpu.map(|limit| limit.min(quota)),
+                    Ok(Some(quota)) => {
+                        cpu = cpu.map(|limit| Some(limit.map_or(quota, |old| old.min(quota))))
+                    }
                     Ok(None) => {}
                     Err(reason) => cpu = Err(reason),
                 }
@@ -354,10 +383,13 @@ fn limits(directory: &Path, visible_root: &Path) -> (Measurement<f64>, Measureme
         }
     }
     let cpu = match cpu {
-        Ok(value) => Measurement::Available { value },
+        _ if !cpu_selected => Measurement::NotCollected,
+        Ok(Some(value)) => Measurement::Available { value },
+        Ok(None) => Measurement::Unlimited,
         Err(reason) => Measurement::unavailable(reason),
     };
     let memory = match memory {
+        _ if !memory_selected => Measurement::NotCollected,
         Ok(Some(value)) => Measurement::Available { value },
         Ok(None) => Measurement::Unlimited,
         Err(reason) => Measurement::unavailable(reason),
@@ -385,13 +417,21 @@ fn pressure(directory: &Path, controller: &str, category: &str) -> Measurement<u
     }
 }
 
-fn read_host(root: &Path, pid: u32) -> Result<CgroupSnapshot, String> {
+fn read_host(
+    root: &Path,
+    pid: u32,
+    groups: &[SystemStatsMetricGroup],
+) -> Result<CgroupSnapshot, String> {
+    let cpu_selected = groups.contains(&SystemStatsMetricGroup::CgroupCpu);
+    let memory_selected = groups.contains(&SystemStatsMetricGroup::CgroupMemory);
+    let pressure_selected = groups.contains(&SystemStatsMetricGroup::CgroupPressure);
     let member_file = root.join(format!("proc/{pid}/cgroup"));
     let member = read_text(&member_file, 16384)?;
     let mounts = read_text(&root.join("proc/self/mountinfo"), 1_048_576)?;
     let (directory, visible_root) = locate(root, membership(&member)?, &mounts)?;
     let target = identity(&directory)?;
-    let (visible_cpu_limit_cores, visible_memory_limit_bytes) = limits(&directory, &visible_root);
+    let (visible_cpu_limit_cores, visible_memory_limit_bytes) =
+        limits(&directory, &visible_root, cpu_selected, memory_selected);
     let snapshot = CgroupSnapshot {
         source: "linux_cgroup_v2".into(),
         scope: "adapter_host_cgroup".into(),
@@ -399,12 +439,36 @@ fn read_host(root: &Path, pid: u32) -> Result<CgroupSnapshot, String> {
         observed_at: rfc3339_millis(SystemTime::now()),
         visible_cpu_limit_cores,
         visible_memory_limit_bytes,
-        memory_current_bytes: number(&directory.join("memory.current")),
-        memory_peak_bytes: number(&directory.join("memory.peak")),
-        swap_current_bytes: number(&directory.join("memory.swap.current")),
-        cpu_usage_microseconds: counter(&directory.join("cpu.stat"), "usage_usec"),
-        cpu_throttled_microseconds: counter(&directory.join("cpu.stat"), "throttled_usec"),
-        oom_kills: counter(&directory.join("memory.events"), "oom_kill"),
+        memory_current_bytes: if memory_selected {
+            number(&directory.join("memory.current"))
+        } else {
+            Measurement::NotCollected
+        },
+        memory_peak_bytes: if memory_selected {
+            number(&directory.join("memory.peak"))
+        } else {
+            Measurement::NotCollected
+        },
+        swap_current_bytes: if memory_selected {
+            number(&directory.join("memory.swap.current"))
+        } else {
+            Measurement::NotCollected
+        },
+        cpu_usage_microseconds: if cpu_selected {
+            counter(&directory.join("cpu.stat"), "usage_usec")
+        } else {
+            Measurement::NotCollected
+        },
+        cpu_throttled_microseconds: if cpu_selected {
+            counter(&directory.join("cpu.stat"), "throttled_usec")
+        } else {
+            Measurement::NotCollected
+        },
+        oom_kills: if memory_selected {
+            counter(&directory.join("memory.events"), "oom_kill")
+        } else {
+            Measurement::NotCollected
+        },
         pressure_stall_microseconds: ["cpu", "memory", "io"]
             .into_iter()
             .flat_map(|controller| {
@@ -412,7 +476,11 @@ fn read_host(root: &Path, pid: u32) -> Result<CgroupSnapshot, String> {
                 ["some", "full"].into_iter().map(move |kind| {
                     (
                         format!("{controller}_{kind}"),
-                        pressure(&directory, controller, kind),
+                        if pressure_selected {
+                            pressure(&directory, controller, kind)
+                        } else {
+                            Measurement::NotCollected
+                        },
                     )
                 })
             })
@@ -432,6 +500,12 @@ pub(crate) fn delta(
     if let Some((before, after)) = before.snapshot().zip(after.snapshot()) {
         if before.target != after.target {
             return Measurement::unavailable("cgroup target changed");
+        }
+        if matches!(
+            (field(before), field(after)),
+            (Measurement::NotCollected, Measurement::NotCollected)
+        ) {
+            return Measurement::NotCollected;
         }
         if let Some((before, after)) = field(before).value().zip(field(after).value()) {
             return after
@@ -502,9 +576,67 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn selecting_memory_skips_cpu_and_pressure_sources() {
+        let root = fixture("memory-selection");
+        let group = root.join("sys/fs/cgroup/parent/child");
+        for name in [
+            "cpu.max",
+            "cpuset.cpus.effective",
+            "cpu.stat",
+            "cpu.pressure",
+        ] {
+            std::fs::write(group.join(name), "invalid").unwrap();
+        }
+        let snapshot = read_host(&root, 42, &[SystemStatsMetricGroup::CgroupMemory]).unwrap();
+        assert!(matches!(
+            snapshot.memory_current_bytes,
+            Measurement::Available { value: 80 }
+        ));
+        assert!(matches!(
+            snapshot.visible_memory_limit_bytes,
+            Measurement::Available { value: 1024 }
+        ));
+        assert!(matches!(
+            snapshot.visible_cpu_limit_cores,
+            Measurement::NotCollected
+        ));
+        assert!(matches!(
+            snapshot.cpu_usage_microseconds,
+            Measurement::NotCollected
+        ));
+        assert!(
+            snapshot
+                .pressure_stall_microseconds
+                .values()
+                .all(|v| matches!(v, Measurement::NotCollected))
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_controller_files_do_not_hide_visible_ancestor_quotas() {
+        let root = fixture("missing-controllers");
+        let group = root.join("sys/fs/cgroup/parent/child");
+        for name in ["cpu.max", "cpuset.cpus.effective", "memory.max"] {
+            std::fs::remove_file(group.join(name)).unwrap();
+        }
+        let snapshot = read_host(&root, 42, &super::super::default_groups()).unwrap();
+        assert!(
+            matches!(snapshot.visible_cpu_limit_cores, Measurement::Available { value } if value == 0.5)
+        );
+        assert!(matches!(
+            snapshot.visible_memory_limit_bytes,
+            Measurement::Available { value: 1024 }
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn reads_visible_ancestor_limits_and_keeps_missing_metrics_explicit() {
         let root = fixture("limits");
-        let snapshot = read_host(&root, 42).unwrap();
+        let snapshot = read_host(&root, 42, &super::super::default_groups()).unwrap();
         assert_eq!(snapshot.visible_cpu_limit_cores.value(), Some(&0.5));
         assert_eq!(snapshot.visible_memory_limit_bytes.value(), Some(&1024));
         assert_eq!(snapshot.memory_current_bytes.value(), Some(&80));
@@ -527,7 +659,7 @@ mod tests {
     fn counter_resets_and_cgroup_changes_never_turn_into_zero_delta() {
         let root = fixture("delta");
         let before = CgroupObservation::Available {
-            snapshot: read_host(&root, 42).unwrap(),
+            snapshot: read_host(&root, 42, &super::super::default_groups()).unwrap(),
         };
         std::fs::write(
             root.join("sys/fs/cgroup/parent/child/cpu.stat"),
@@ -535,7 +667,7 @@ mod tests {
         )
         .unwrap();
         let mut after = CgroupObservation::Available {
-            snapshot: read_host(&root, 42).unwrap(),
+            snapshot: read_host(&root, 42, &super::super::default_groups()).unwrap(),
         };
         assert!(matches!(
             delta(&before, &after, |s| &s.cpu_usage_microseconds),

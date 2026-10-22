@@ -61,7 +61,8 @@ pub use schema::{
 };
 pub use system_stats::{
     CgroupObservation, CgroupSnapshot, CgroupStats, GaugeSummary, InvocationSystemStats,
-    Measurement, ResourceObservation, SampleSummary, SystemStatsConfig,
+    Measurement, ResourceObservation, SampleSummary, SystemStatsConfig, SystemStatsMetricGroup,
+    SystemStatsSamplingConfig,
 };
 
 /// Returns the crate version compiled into this build.

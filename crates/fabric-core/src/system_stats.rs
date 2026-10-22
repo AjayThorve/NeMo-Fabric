@@ -16,15 +16,92 @@ pub use cgroup::{CgroupObservation, CgroupSnapshot, Measurement};
 pub use sampling::{GaugeSummary, SampleSummary};
 pub(crate) use sampling::{StatsSession, SystemReader};
 
-/// Opt-in, bounded periodic collection. Endpoint readings remain available
-/// without this configuration and without Relay or invocation recording.
+/// Resource groups supported by the native invocation collector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum SystemStatsMetricGroup {
+    /// Adapter host process-tree CPU, resident memory, and process count.
+    #[serde(rename = "process")]
+    Process,
+    /// Cgroup CPU capacity, usage, and throttling.
+    #[serde(rename = "cgroup.cpu")]
+    CgroupCpu,
+    /// Cgroup memory capacity, usage, swap, and OOM kills.
+    #[serde(rename = "cgroup.memory")]
+    CgroupMemory,
+    /// Cgroup CPU, memory, and I/O pressure counters.
+    #[serde(rename = "cgroup.pressure")]
+    CgroupPressure,
+}
+
+/// Native invocation collection, independent of Relay and recording.
+/// Omitted configuration collects all supported groups at the endpoints.
+/// Explicit null disables invocation stats, preserving the existing final
+/// `resource_snapshot` contract. Periodic sampling is independently opt-in.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SystemStatsConfig {
+    /// Groups to collect and persist. Omission selects all supported groups.
+    #[serde(default = "default_groups")]
+    #[schemars(length(min = 1), extend("uniqueItems" = true))]
+    pub collect: Vec<SystemStatsMetricGroup>,
+    /// Optional bounded periodic collection; absence means endpoints only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<SystemStatsSamplingConfig>,
+}
+
+fn default_groups() -> Vec<SystemStatsMetricGroup> {
+    use SystemStatsMetricGroup::*;
+    vec![Process, CgroupCpu, CgroupMemory, CgroupPressure]
+}
+
+impl Default for SystemStatsConfig {
+    fn default() -> Self {
+        Self {
+            collect: default_groups(),
+            sampling: None,
+        }
+    }
+}
+
+pub(crate) fn default_system_stats() -> Option<SystemStatsConfig> {
+    Some(SystemStatsConfig::default())
+}
+
+impl SystemStatsConfig {
+    pub(crate) fn includes(&self, group: SystemStatsMetricGroup) -> bool {
+        self.collect.contains(&group)
+    }
+
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.collect.is_empty()
+            || self
+                .collect
+                .iter()
+                .enumerate()
+                .any(|(i, group)| self.collect[..i].contains(group))
+        {
+            return Err(FabricError::InvalidConfig {
+                field: "system_stats.collect".into(),
+                reason:
+                    "must contain at least one group, without duplicates; use null to disable stats"
+                        .into(),
+            });
+        }
+        if let Some(sampling) = &self.sampling {
+            sampling.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// Bounded periodic collection within an enabled invocation stats configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SystemStatsSamplingConfig {
     /// Target sample cadence, in milliseconds. Actual cadence is reported.
     #[serde(default = "default_interval")]
     #[schemars(range(min = 100, max = 60000))]
-    pub sample_interval_ms: u32,
+    pub interval_ms: u32,
     /// Maximum retained readings, including both endpoints. Intermediate
     /// readings are dropped at this bound; the final reading is preserved.
     #[serde(default = "default_max_samples")]
@@ -39,21 +116,21 @@ fn default_max_samples() -> u32 {
     10000
 }
 
-impl Default for SystemStatsConfig {
+impl Default for SystemStatsSamplingConfig {
     fn default() -> Self {
         Self {
-            sample_interval_ms: default_interval(),
+            interval_ms: default_interval(),
             max_samples: default_max_samples(),
         }
     }
 }
 
-impl SystemStatsConfig {
+impl SystemStatsSamplingConfig {
     pub(crate) fn validate(&self) -> Result<()> {
         for (field, valid, reason) in [
             (
-                "sample_interval_ms",
-                (100..=60000).contains(&self.sample_interval_ms),
+                "interval_ms",
+                (100..=60000).contains(&self.interval_ms),
                 "must be between 100 and 60000",
             ),
             (
@@ -64,7 +141,7 @@ impl SystemStatsConfig {
         ] {
             if !valid {
                 return Err(FabricError::InvalidConfig {
-                    field: format!("system_stats.{field}"),
+                    field: format!("system_stats.sampling.{field}"),
                     reason: reason.into(),
                 });
             }
@@ -78,6 +155,8 @@ impl SystemStatsConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ResourceObservation {
+    /// The process group was explicitly excluded from collection.
+    NotCollected,
     /// The process tree was read successfully.
     Available {
         /// Timestamped cumulative counters and instantaneous gauges.
@@ -114,7 +193,7 @@ impl ResourceObservation {
     pub(crate) fn snapshot(&self) -> Option<&RuntimeResourceSnapshot> {
         match self {
             Self::Available { snapshot } => Some(snapshot),
-            Self::Unavailable { .. } | Self::Unsupported { .. } => None,
+            Self::NotCollected | Self::Unavailable { .. } | Self::Unsupported { .. } => None,
         }
     }
 }
@@ -129,6 +208,9 @@ impl ResourceObservation {
 /// because process reaping and reparenting can change which work is visible.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct InvocationSystemStats {
+    /// Requested groups, including selected groups unavailable on this platform.
+    #[serde(default = "default_groups")]
+    pub collected_groups: Vec<SystemStatsMetricGroup>,
     /// Monotonic elapsed seconds for the adapter exchange. Excludes runtime
     /// startup, endpoint collection, artifact preparation, and teardown.
     /// Optional sampling runs concurrently; its effect is not subtracted.
@@ -237,6 +319,7 @@ impl InvocationSystemStats {
                         .then_some(delta)
                 });
         Self {
+            collected_groups: default_groups(),
             elapsed_seconds,
             before,
             after,

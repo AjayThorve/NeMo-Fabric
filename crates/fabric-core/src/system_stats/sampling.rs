@@ -17,7 +17,10 @@ use std::time::{Duration, Instant};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{CgroupObservation, Measurement, ResourceObservation, SystemStatsConfig, cgroup};
+use super::{
+    CgroupObservation, Measurement, ResourceObservation, SystemStatsMetricGroup,
+    SystemStatsSamplingConfig, cgroup,
+};
 use crate::resource_snapshot::{LocalHostProcess, snapshot_local_host};
 use crate::runtime::{ArtifactRef, InvocationHandle};
 
@@ -26,6 +29,7 @@ pub(crate) struct SystemReader {
     pub runtime_id: String,
     pub host: Option<LocalHostProcess>,
     pub local: bool,
+    pub collect: Vec<SystemStatsMetricGroup>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,26 +43,42 @@ impl SystemReader {
     pub(crate) fn read(&self) -> Reading {
         let started = Instant::now();
         let collected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let resource = if self.local {
-                snapshot_local_host(&self.runtime_id, self.host.as_ref())
+            let resource = if !self.collect.contains(&SystemStatsMetricGroup::Process) {
+                ResourceObservation::NotCollected
             } else {
-                Err(crate::FabricError::ResourceObservationUnsupported {
-                    runtime_id: self.runtime_id.clone(),
-                    reason: "provider has no local resource reader".into(),
+                ResourceObservation::from_result(if self.local {
+                    snapshot_local_host(&self.runtime_id, self.host.as_ref())
+                } else {
+                    Err(crate::FabricError::ResourceObservationUnsupported {
+                        runtime_id: self.runtime_id.clone(),
+                        reason: "provider has no local resource reader".into(),
+                    })
                 })
             };
             (
-                ResourceObservation::from_result(resource),
-                cgroup::observe(self.host.as_ref(), self.local),
+                resource,
+                cgroup::observe(self.host.as_ref(), self.local, &self.collect),
             )
         }));
         let (adapter_tree, cgroup) = collected.unwrap_or_else(|_| {
             (
-                ResourceObservation::Unavailable {
-                    reason: "resource collector panicked".into(),
+                if self.collect.contains(&SystemStatsMetricGroup::Process) {
+                    ResourceObservation::Unavailable {
+                        reason: "resource collector panicked".into(),
+                    }
+                } else {
+                    ResourceObservation::NotCollected
                 },
-                CgroupObservation::Unavailable {
-                    reason: "resource collector panicked".into(),
+                if self
+                    .collect
+                    .iter()
+                    .any(|group| *group != SystemStatsMetricGroup::Process)
+                {
+                    CgroupObservation::Unavailable {
+                        reason: "resource collector panicked".into(),
+                    }
+                } else {
+                    CgroupObservation::NotCollected
                 },
             )
         });
@@ -120,9 +140,11 @@ pub struct SampleSummary {
     /// counters and no gaps over twice cadence. This does not prove exclusivity.
     pub cgroup_target_continuous: bool,
     /// Adapter-host tree resident-memory reductions.
-    pub resident_memory_bytes: GaugeSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resident_memory_bytes: Option<GaugeSummary>,
     /// Adapter-host tree live-process-count reductions.
-    pub process_count: GaugeSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_count: Option<GaugeSummary>,
     /// Estimated CPU counter delta, invalidated by observed resets, missing
     /// endpoints, target changes, or collection gaps larger than twice cadence.
     pub cpu_time_seconds_estimate: Measurement<f64>,
@@ -214,7 +236,7 @@ fn flush_pending(pending: Option<Pending>) {
 }
 
 struct SampleState {
-    config: SystemStatsConfig,
+    config: SystemStatsSamplingConfig,
     ids: InvocationHandle,
     started: Instant,
     next_due: Instant,
@@ -242,7 +264,7 @@ struct SampleState {
 
 impl SampleState {
     fn push(&mut self, t: f64, reading: &Reading) {
-        let maximum_gap = f64::from(self.config.sample_interval_ms) / 500.0;
+        let maximum_gap = f64::from(self.config.interval_ms) / 500.0;
         if self.count > 0 {
             self.largest_gap = self.largest_gap.max(t - self.last_t);
             self.cpu_invalid |= t - self.last_t > maximum_gap;
@@ -330,8 +352,12 @@ impl SampleState {
             .unwrap_or(Measurement::Unavailable {
                 reason: "CPU delta or duration is unavailable".into(),
             });
+        let selected_process = self
+            .reader
+            .collect
+            .contains(&SystemStatsMetricGroup::Process);
         SampleSummary {
-            target_interval_ms: self.config.sample_interval_ms,
+            target_interval_ms: self.config.interval_ms,
             max_samples: self.config.max_samples,
             sample_count: self.count,
             dropped_samples: self.dropped,
@@ -347,11 +373,27 @@ impl SampleState {
                 metadata: BTreeMap::new(),
             }),
             cgroup_target_continuous: !self.cgroup_invalid
-                && self.largest_gap <= f64::from(self.config.sample_interval_ms) / 500.0,
-            resident_memory_bytes: self.rss.finish("byte", elapsed),
-            process_count: self.processes.finish("process", elapsed),
-            cpu_time_seconds_estimate,
-            cpu_percent_one_core,
+                && self.largest_gap <= f64::from(self.config.interval_ms) / 500.0,
+            resident_memory_bytes: self
+                .reader
+                .collect
+                .contains(&SystemStatsMetricGroup::Process)
+                .then(|| self.rss.finish("byte", elapsed)),
+            process_count: self
+                .reader
+                .collect
+                .contains(&SystemStatsMetricGroup::Process)
+                .then(|| self.processes.finish("process", elapsed)),
+            cpu_time_seconds_estimate: if selected_process {
+                cpu_time_seconds_estimate
+            } else {
+                Measurement::NotCollected
+            },
+            cpu_percent_one_core: if selected_process {
+                cpu_percent_one_core
+            } else {
+                Measurement::NotCollected
+            },
         }
     }
 }
@@ -406,9 +448,8 @@ impl SampleTicker {
                                 if state.closed || Instant::now() < state.next_due {
                                     continue;
                                 }
-                                let interval = Duration::from_millis(u64::from(
-                                    state.config.sample_interval_ms,
-                                ));
+                                let interval =
+                                    Duration::from_millis(u64::from(state.config.interval_ms));
                                 let missed = Instant::now()
                                     .saturating_duration_since(state.next_due)
                                     .as_nanos()
@@ -456,7 +497,7 @@ pub(crate) struct StatsSession {
 
 impl StatsSession {
     pub(crate) fn prepare(
-        config: &SystemStatsConfig,
+        config: &SystemStatsSamplingConfig,
         ids: &InvocationHandle,
         reader: SystemReader,
         before: &Reading,
@@ -485,7 +526,7 @@ impl StatsSession {
             config: config.clone(),
             ids: ids.clone(),
             started,
-            next_due: started + Duration::from_millis(u64::from(config.sample_interval_ms)),
+            next_due: started + Duration::from_millis(u64::from(config.interval_ms)),
             closed: false,
             file,
             pending: None,
@@ -523,8 +564,7 @@ impl StatsSession {
         {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.started = started;
-            state.next_due =
-                started + Duration::from_millis(u64::from(state.config.sample_interval_ms));
+            state.next_due = started + Duration::from_millis(u64::from(state.config.interval_ms));
         }
         self.ticker
             .records
@@ -642,7 +682,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let session = StatsSession::prepare(
-            &SystemStatsConfig::default(),
+            &SystemStatsSamplingConfig::default(),
             &InvocationHandle {
                 runtime_id: "runtime-1".into(),
                 invocation_id: "invocation-1".into(),
@@ -652,6 +692,7 @@ mod tests {
                 runtime_id: "runtime-1".into(),
                 host: None,
                 local: false,
+                collect: super::super::default_groups(),
             },
             baseline,
             &root,

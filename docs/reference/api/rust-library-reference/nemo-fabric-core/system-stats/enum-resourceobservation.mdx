@@ -3,18 +3,24 @@ title: "Enum Resource Observation"
 sidebar-title: "ResourceObservation"
 slug: "/reference/api/rust-library-reference/nemo-fabric-core/system_stats/enum-resourceobservation"
 description: "One attempt to observe the adapter host process tree. Missing readings are explicit; an unavailable observation never stands for zero resource usage."
-position: 10
+position: 11
 ---
 {/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0 */}
 
 Generated from `cargo doc --no-deps -p nemo-fabric-core`.
 
-<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "pub enum ResourceObservation &#123;\n    Available &#123;\n        snapshot: <a href=\"../resource-snapshot/struct-runtimeresourcesnapshot.mdx\">RuntimeResourceSnapshot</a>,\n    &#125;,\n    Unavailable &#123;\n        reason: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/string/struct.String.html\">String</a>,\n    &#125;,\n    Unsupported &#123;\n        reason: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/string/struct.String.html\">String</a>,\n    &#125;,\n&#125;"}} /></pre>
+<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "pub enum ResourceObservation &#123;\n    NotCollected,\n    Available &#123;\n        snapshot: <a href=\"../resource-snapshot/struct-runtimeresourcesnapshot.mdx\">RuntimeResourceSnapshot</a>,\n    &#125;,\n    Unavailable &#123;\n        reason: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/string/struct.String.html\">String</a>,\n    &#125;,\n    Unsupported &#123;\n        reason: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/string/struct.String.html\">String</a>,\n    &#125;,\n&#125;"}} /></pre>
 
 One attempt to observe the adapter host process tree. Missing readings are explicit; an unavailable observation never stands for zero resource usage.
 
 ## Variants
+
+### `NotCollected`
+
+<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "NotCollected"}} /></pre>
+
+The process group was explicitly excluded from collection.
 
 ### `Available`
 

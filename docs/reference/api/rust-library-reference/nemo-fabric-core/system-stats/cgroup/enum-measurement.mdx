@@ -10,11 +10,17 @@ SPDX-License-Identifier: Apache-2.0 */}
 
 Generated from `cargo doc --no-deps -p nemo-fabric-core`.
 
-<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "pub enum Measurement&lt;T&gt; &#123;\n    Available &#123;\n        value: T,\n    &#125;,\n    Unlimited,\n    Unavailable &#123;\n        reason: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/string/struct.String.html\">String</a>,\n    &#125;,\n    Unsupported &#123;\n        reason: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/string/struct.String.html\">String</a>,\n    &#125;,\n&#125;"}} /></pre>
+<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "pub enum Measurement&lt;T&gt; &#123;\n    NotCollected,\n    Available &#123;\n        value: T,\n    &#125;,\n    Unlimited,\n    Unavailable &#123;\n        reason: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/string/struct.String.html\">String</a>,\n    &#125;,\n    Unsupported &#123;\n        reason: <a href=\"https://doc.rust-lang.org/1.94.0/alloc/string/struct.String.html\">String</a>,\n    &#125;,\n&#125;"}} /></pre>
 
 A measured value or its availability. Unlimited is distinct from unknown and is used only for limits. No missing measurement is replaced with zero.
 
 ## Variants
+
+### `NotCollected`
+
+<pre className="rust-signature"><code dangerouslySetInnerHTML={{"__html": "NotCollected"}} /></pre>
+
+Its metric group was explicitly excluded from collection.
 
 ### `Available`
 

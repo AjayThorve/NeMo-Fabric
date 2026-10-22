@@ -1514,7 +1514,7 @@ Adapter host process-tree reading, or an explicit collection failure.
 
 **Attributes:**
 
- - <b>`status`</b>:  ``available``, ``unavailable``, or ``unsupported``.
+ - <b>`status`</b>:  ``available``, ``unavailable``, ``unsupported``, or ``not_collected``.
  - <b>`snapshot`</b>:  Present only when available; a ``RuntimeResourceSnapshot``.
  - <b>`reason`</b>:  Present only when unavailable or unsupported.
 
@@ -1604,7 +1604,7 @@ Measured numeric value, an unlimited limit, or explicit missing evidence.
 
 **Attributes:**
 
- - <b>`status`</b>:  available, unlimited, unavailable, or unsupported.
+ - <b>`status`</b>:  available, unlimited, unavailable, unsupported, or not_collected.
  - <b>`value`</b>:  Numeric reading when available, otherwise None.
  - <b>`reason`</b>:  Collection failure/capability reason, otherwise None.
 
@@ -2027,8 +2027,8 @@ The mapping exposes the following typed fields:
 | `diagnostics` | `Sequence[str]` |
 | `samples` | `ArtifactRef \| None` |
 | `cgroup_target_continuous` | `bool` |
-| `resident_memory_bytes` | `GaugeSummary` |
-| `process_count` | `GaugeSummary` |
+| `resident_memory_bytes` | `GaugeSummary \| None` |
+| `process_count` | `GaugeSummary \| None` |
 | `cpu_time_seconds_estimate` | `Measurement` |
 | `cpu_percent_one_core` | `Measurement` |
 
@@ -2115,6 +2115,7 @@ The mapping exposes the following typed fields:
 | --- | --- |
 | `cgroup` | `CgroupStats \| None` |
 | `sampled` | `SampleSummary \| None` |
+| `collected_groups` | `Sequence[str]` |
 | `elapsed_seconds` | `float` |
 | `before` | `ResourceObservation` |
 | `after` | `ResourceObservation` |
