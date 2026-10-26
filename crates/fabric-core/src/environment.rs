@@ -616,7 +616,10 @@ where
     else {
         unreachable!("runtime provider path requires a runtime command")
     };
-    if let TaskCommand::Check { timeout_seconds } = task_command {
+    if let TaskCommand::Check {
+        timeout_seconds, ..
+    } = task_command
+    {
         let budget = *timeout_seconds;
         return request_check_provider_process(command, operation, budget);
     }
@@ -1438,7 +1441,12 @@ else:
                 }))
                 .expect("environment fixture");
                 let timeout_seconds = if response == "timeout" { 0.3 } else { 1.0 };
-                let task = TaskCommand::Check { timeout_seconds };
+                let task = TaskCommand::Check {
+                    timeout_seconds,
+                    agent: None,
+                    runtime_id: None,
+                    level: None,
+                };
                 let started = Instant::now();
                 let result = request_check_provider_process::<Value>(
                     command,
