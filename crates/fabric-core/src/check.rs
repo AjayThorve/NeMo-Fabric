@@ -578,6 +578,11 @@ fn valid_remote_report(report: &CheckReport, request: &CheckRequest) -> bool {
         return false;
     }
     let levels = [CheckStage::Live, CheckStage::Active, CheckStage::Ready];
+    let sources = [
+        CheckSource::AdapterLiveness,
+        CheckSource::AdapterInterface,
+        CheckSource::AdapterReadiness,
+    ];
     let count = match level {
         CheckLevel::Live => 1,
         CheckLevel::Active => 2,
@@ -600,13 +605,7 @@ fn valid_remote_report(report: &CheckReport, request: &CheckRequest) -> bool {
             return false;
         }
         if check.outcome == CheckOutcome::Passed
-            && (check.observed_at.is_none()
-                || check.source
-                    != [
-                        CheckSource::AdapterLiveness,
-                        CheckSource::AdapterInterface,
-                        CheckSource::AdapterReadiness,
-                    ][index])
+            && (check.observed_at.is_none() || check.source != sources[index])
         {
             return false;
         }
@@ -952,7 +951,7 @@ pub fn check_environment(
                     let result = if remaining <= 0.0 {
                         unobserved(CheckReason::ProbeTimeout)
                     } else {
-                        probe_runtime(runtime_id, probe, remaining)
+                        probe_runtime(&binding.runtime, probe, remaining)
                     };
                     report.outcome = result.outcome;
                     report.reason_code = result.reason_code;
@@ -1066,8 +1065,8 @@ fn verify_health_mac(
         .is_ok()
 }
 
-fn probe_runtime(runtime_id: &str, level: CheckLevel, timeout: f64) -> AdapterCheckResult {
-    probe_target(runtime_id, level, timeout, CheckScope::Runtime)
+fn probe_runtime(runtime: &RuntimeHandle, level: CheckLevel, timeout: f64) -> AdapterCheckResult {
+    probe_target(&runtime.runtime_id, level, timeout, CheckScope::Runtime)
 }
 
 fn probe_target(
@@ -1167,13 +1166,10 @@ fn probe_target(
                     && time <= DateTime::<Utc>::from(SystemTime::now())
             })
         });
-        let expected_source = match (scope, level) {
-            (CheckScope::Service, CheckLevel::Live) => CheckSource::AdapterLiveness,
-            (CheckScope::Service, CheckLevel::Active) => CheckSource::AdapterInterface,
-            (CheckScope::Service, CheckLevel::Ready) => CheckSource::AdapterReadiness,
-            (_, CheckLevel::Live) => CheckSource::AdapterLiveness,
-            (_, CheckLevel::Active) => CheckSource::AdapterInterface,
-            (_, CheckLevel::Ready) => CheckSource::AdapterReadiness,
+        let expected_source = match level {
+            CheckLevel::Live => CheckSource::AdapterLiveness,
+            CheckLevel::Active => CheckSource::AdapterInterface,
+            CheckLevel::Ready => CheckSource::AdapterReadiness,
         };
         if (observation.outcome == CheckOutcome::Passed) != observation.reason_code.is_none()
             || (observation.outcome == CheckOutcome::Passed
@@ -1373,6 +1369,30 @@ mod tests {
                 CheckLevel::Active => "fabric.adapter.interface",
                 _ => "fabric.adapter.readiness",
             }, "observed_at": utc_now()})
+    }
+
+    #[test]
+    fn openclaw_runtime_checks_accept_qualified_native_evidence() {
+        let mut runtime = runtime();
+        runtime.adapter_id = Some("nvidia.fabric.openclaw".into());
+        register(
+            &runtime,
+            vec![CheckLevel::Live, CheckLevel::Active, CheckLevel::Ready],
+        );
+        let peer = peer(&runtime, 3, |_, level| {
+            let mut observation = gateway_passed(level);
+            observation["activity"] = "busy".into();
+            observation
+        });
+        let request = request(&runtime, CheckLevel::Ready, 3.0);
+        let report = check_environment(&runtime.environment, &request).unwrap();
+        assert_eq!(report.outcome, CheckOutcome::Passed);
+        assert!(valid_remote_report(&report, &request));
+        assert_eq!(peer.join().unwrap().len(), 3);
+        let mut wrong_stage = report;
+        wrong_stage.checks[1].source = CheckSource::AdapterLiveness;
+        assert!(!valid_remote_report(&wrong_stage, &request));
+        cleanup(&runtime);
     }
 
     #[test]
