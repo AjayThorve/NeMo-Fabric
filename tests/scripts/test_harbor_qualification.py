@@ -529,6 +529,8 @@ def test_report_redaction_preserves_types_and_custom_credentials(
     tmp_path, qualification_plan
 ):
     os.environ["MODEL_API_KEY"] = "true"
+    os.environ["AWS_ACCESS_KEY_ID"] = "fake-access-key-id"
+    os.environ["AZURE_STORAGE_CONNECTION_STRING"] = "fake-connection-string"
     os.environ["BROKER_CREDENTIAL_HANDLE"] = "opaque-custom-secret"
     os.environ["DOCKER_AUTH_CONFIG"] = (
         '{"auths":{"registry":{"auth":"encoded-secret"}}}'
@@ -542,7 +544,8 @@ def test_report_redaction_preserves_types_and_custom_credentials(
                 "adapter_id": "one",
                 "outcome": "passed",
                 "selected": {"api_key_env": "BROKER_CREDENTIAL_HANDLE"},
-                "reason": "opaque-custom-secret " + os.environ["DOCKER_AUTH_CONFIG"],
+                "reason": "opaque-custom-secret fake-access-key-id fake-connection-string "
+                + os.environ["DOCKER_AUTH_CONFIG"],
                 "nested": [True, False, None, 1, "true"],
             }
         ],
@@ -552,6 +555,8 @@ def test_report_redaction_preserves_types_and_custom_credentials(
     redacted = json.loads(text)
     assert redacted["release_qualified"] is True
     assert redacted["adapters"][0]["nested"] == [True, False, None, 1, "[REDACTED]"]
+    assert "fake-access-key-id" not in text
+    assert "fake-connection-string" not in text
     assert "opaque-custom-secret" not in text
     assert os.environ["DOCKER_AUTH_CONFIG"] not in text
     assert "opaque-custom-secret" not in (tmp_path / "summary.md").read_text()

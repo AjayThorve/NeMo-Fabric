@@ -60,7 +60,12 @@ def sanitize(text: str, credential_names: tuple[str, ...] = ()) -> str:
             and len(value) >= 4
             and (
                 name in credential_names
-                or name == "DOCKER_AUTH_CONFIG"
+                or name
+                in {
+                    "DOCKER_AUTH_CONFIG",
+                    "AWS_ACCESS_KEY_ID",
+                    "AZURE_STORAGE_CONNECTION_STRING",
+                }
                 or re.search(
                     r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)$", name, re.I
                 )
