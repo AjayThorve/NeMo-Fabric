@@ -347,6 +347,15 @@ def validate_plan(plan: dict) -> None:
             raise ValueError("invalid plan action")
         if row["action"] != "run" and not row.get("reason"):
             raise ValueError("non-run entries require a reason")
+        provider = row.get("model_provider")
+        if provider is not None and (
+            not isinstance(provider, str)
+            or not provider
+            or provider != provider.strip()
+        ):
+            raise ValueError(
+                "model_provider must be non-empty without surrounding whitespace"
+            )
         key = row.get("api_key_env")
         if key and (
             not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
@@ -553,6 +562,8 @@ def harbor_command(
         "fabric_timeout_sec": plan["runtime_timeout_seconds"] + 60,
         "fabric_telemetry": row["telemetry"],
     }
+    if row.get("model_provider") is not None:
+        options["fabric_model_provider"] = row["model_provider"]
     if row.get("base_url"):
         options["fabric_model_base_url"] = row["base_url"]
     if row.get("api_key_env"):
@@ -668,6 +679,11 @@ def selection_payload(plan: dict, row: dict) -> dict:
         if row["catalog"]["ecosystem"] == "typescript"
         else []
     )
+    provider_options = (
+        {"model_provider_name": row["model_provider"]}
+        if row.get("model_provider") is not None
+        else {}
+    )
     config = build_harbor_config(
         adapter_id=row["adapter_id"],
         workspace="/app",
@@ -679,6 +695,7 @@ def selection_payload(plan: dict, row: dict) -> dict:
         enabled_tools=row.get("enabled_tools"),
         telemetry=row["telemetry"],
         discovery_paths=tuple(paths),
+        **provider_options,
     )
     return {"config": config.to_mapping(), "config_base_dir": "/app"}
 
@@ -993,9 +1010,12 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                     "package": row["catalog"]["package"],
                     "descriptor_sha256": row["catalog"]["sha256"],
                     "model": row["model"],
-                    "provider": row["model"].split("/", 1)[0]
-                    if "/" in row["model"]
-                    else "openai",
+                    "provider": row.get("model_provider")
+                    or (
+                        row["model"].split("/", 1)[0]
+                        if "/" in row["model"]
+                        else "openai"
+                    ),
                     "base_url": row.get("base_url"),
                     "api_key_env": row.get("api_key_env"),
                     "harness_settings": row["harness_settings"],

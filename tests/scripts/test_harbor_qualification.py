@@ -629,3 +629,65 @@ def test_jsonl_redaction_keeps_unicode_separators_inside_records(suffix):
     assert cleaned.endswith("\n")
     parsed = [json.loads(line) for line in cleaned.split("\n") if line]
     assert parsed == [{"credential": "[REDACTED]", "flag": True}, records[1]]
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
+@pytest.mark.parametrize("provider", ["", " ", " openai", "openai ", 1])
+def test_provider_override_rejects_invalid_values(qualification_plan, provider):
+    qualification_plan["adapters"][0]["model_provider"] = provider
+    with pytest.raises(ValueError, match="model_provider must be"):
+        qualify.validate_plan(qualification_plan)
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
+def test_provider_override_preserves_model_in_command_selection_and_report(
+    qualification_plan, tmp_path, monkeypatch
+):
+    from nemo_fabric.integrations.harbor import fabric_agent
+
+    row = next(
+        row
+        for row in qualification_plan["adapters"]
+        if row["adapter_id"] == "nvidia.fabric.qwen"
+    )
+    row["model_provider"] = "openai"
+    model = row["model"]
+    command = qualify.harbor_command(
+        qualification_plan, row, "python", tmp_path, tmp_path, "trial"
+    )
+    assert command[command.index("--model") + 1] == model
+    assert "fabric_model_provider=openai" in command
+
+    original = fabric_agent.build_harbor_config
+    received = {}
+
+    def compatible_bridge(**kwargs):
+        # Emulate the optional argument while keeping this gate usable with older SDKs.
+        received.update(kwargs)
+        provider = kwargs.pop("model_provider_name")
+        config = original(**kwargs)
+        config.models["default"].provider = provider
+        return config
+
+    monkeypatch.setattr(fabric_agent, "build_harbor_config", compatible_bridge)
+    payload = qualify.selection_payload(qualification_plan, row)
+    assert received["model_provider_name"] == "openai"
+    assert payload["config"]["models"]["default"]["provider"] == "openai"
+    assert payload["config"]["models"]["default"]["model"] == model
+
+    output = tmp_path / "qualification"
+    assert (
+        qualify.run(
+            qualification_plan,
+            {"plan": qualification_plan},
+            output,
+            [row["adapter_id"]],
+        )
+        == 1
+    )
+    report = qualify.load(output / "report.json")
+    selected = next(
+        item for item in report["adapters"] if item["adapter_id"] == row["adapter_id"]
+    )["selected"]
+    assert selected["provider"] == "openai"
+    assert selected["model"] == model
