@@ -597,3 +597,19 @@ def test_custom_credential_is_redacted_before_log_write(tmp_path):
 )
 def test_http_codes_do_not_match_inside_identifiers(text, category):
     assert qualify.classify(text) == category
+
+
+@pytest.mark.parametrize("suffix", [".json", ".jsonl"])
+def test_artifact_redaction_preserves_machine_readable_evidence(suffix):
+    os.environ["MODEL_API_KEY"] = "true"
+    original = {"flag": True, "value": None, "credential": "true"}
+    text = json.dumps(original) + "\n"
+    if suffix == ".jsonl":
+        text += json.dumps({"flag": False, "count": 1}) + "\n"
+    result = qualify.sanitize_artifact(text, suffix, ("MODEL_API_KEY",))
+    objects = [json.loads(line) for line in result.splitlines()]
+    assert objects[0] == {"flag": True, "value": None, "credential": "[REDACTED]"}
+    if suffix == ".jsonl":
+        assert objects[1] == {"flag": False, "count": 1}
+    os.environ["MODEL_API_KEY"] = "different-secret"
+    assert qualify.sanitize_artifact(text, suffix, ("MODEL_API_KEY",)) == text

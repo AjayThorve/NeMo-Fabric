@@ -93,6 +93,25 @@ def sanitize_data(value: object, credential_names: tuple[str, ...]) -> object:
     return value
 
 
+def sanitize_artifact(text: str, suffix: str, credential_names: tuple[str, ...]) -> str:
+    """Preserve machine-readable trial evidence when scrubbing credential values."""
+    if suffix in {".jsonl", ".ndjson"}:
+        return "".join(
+            sanitize_artifact(line, ".json", credential_names)
+            for line in text.splitlines(keepends=True)
+        )
+    if suffix == ".json":
+        try:
+            value = json.loads(text)
+        except ValueError:
+            return sanitize(text, credential_names)
+        cleaned = sanitize_data(value, credential_names)
+        if cleaned == value:
+            return text
+        return json.dumps(cleaned, ensure_ascii=False) + "\n"
+    return sanitize(text, credential_names)
+
+
 def process_env(key_env: str | None = None) -> dict[str, str]:
     names = (
         "PATH",
@@ -1249,8 +1268,10 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                         text = path.read_text(encoding="utf-8")
                     except UnicodeError:
                         continue
-                    cleaned = sanitize(
-                        text, (row["api_key_env"],) if row.get("api_key_env") else ()
+                    cleaned = sanitize_artifact(
+                        text,
+                        path.suffix,
+                        (row["api_key_env"],) if row.get("api_key_env") else (),
                     )
                     if cleaned != text:
                         path.write_text(cleaned, encoding="utf-8")
