@@ -238,14 +238,6 @@ Do not commit a static Python package version into
 `sdk/python/nemo-fabric-runtime/pyproject.toml` just to cut the release.
 Maturin derives that version from Cargo during the build.
 
-## Harbor Integration Qualification
-
-The release person in charge (PIC) must run the [`qualify-harbor`](.agents/skills/qualify-harbor/SKILL.md) maintainer gate for each release candidate, beta, and stable release before authorizing its tag. Use the exact intended source commit or matching candidate packages, a pinned compatible Harbor version, and real inference. Run one shared, pinned Terminal-Bench task across the catalog; this gate does not run the full benchmark dataset. Retain the sanitized `report.json`, `summary.md`, complete plan, installation evidence, and private trial artifacts with the release record. Source-built qualification must be labeled as such; it does not prove registry installation. Validate published candidate packages in registry mode when available, and confirm publication separately through the existing deployment checks.
-
-The denominator is the complete current adapter catalog, including provider-specific and remote-service adapters. A developer subset, reward-only smoke, missing credential, install failure, unsupported provider/model, unavailable harness, timeout, cancellation, absent usage, or skipped entry cannot satisfy the automated release gate. Verify host/task package identity, selected versus observed adapter and descriptor fingerprint, result transport, deterministic reward, usage, and cleanup separately. Record MCP, skills, telemetry/export, and subagent evidence where exercised and explicitly mark remaining feature coverage as untested or unsupported; one task establishes neither benchmark performance nor all-feature equivalence.
-
-Stop on an unexplained failure or incomplete coverage. Reproduce and classify findings, then fix the gate or file the product/infrastructure issue as appropriate. If the release owner accepts a known limitation, record the actual accepting person's name, reason, affected entries/features, and decision reference with the report. Do not invent signoff or convert waived failures into passing results. A release with accepted gaps must disclose that qualification is incomplete and link the waiver decision. Reusing evidence from a different source/package/harness/Harbor version requires a new qualification run; historical upstream flakes are not current-run exemptions.
-
 ## Local Validation
 
 Run the checks that match the surfaces affected by the release. For a normal

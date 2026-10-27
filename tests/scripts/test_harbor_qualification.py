@@ -107,7 +107,6 @@ def test_registry_prerelease_keeps_python_and_npm_versions_distinct(qualificatio
         "descriptor",
         "source",
         "version",
-        "waiver",
         "credential_url",
         "untrusted_http",
         "inline_secret",
@@ -131,8 +130,6 @@ def test_plan_rejects_incomplete_or_unattributable_coverage(
         plan["source_sha"] = "0" * 40
     elif mutation == "version":
         plan["version"] = "999.0.0"
-    elif mutation == "waiver":
-        row["waiver"] = {"reason": "not enough"}
     elif mutation == "credential_url":
         row["base_url"] = "https://user:secret@example.com/v1"
     elif mutation == "untrusted_http":
@@ -151,11 +148,9 @@ def test_plan_rejects_incomplete_or_unattributable_coverage(
 
 
 @pytest.mark.parametrize("outcome", ["blocked", "failed", "unsupported", "excluded"])
-def test_nonpasses_and_waivers_never_turn_release_green(
-    tmp_path, qualification_plan, outcome
-):
+def test_nonpasses_never_turn_full_catalog_green(tmp_path, qualification_plan, outcome):
     report = {
-        "scope": "release",
+        "scope": "full_catalog",
         "plan": qualification_plan,
         "adapters": [
             {"adapter_id": "one", "outcome": "passed"},
@@ -163,20 +158,15 @@ def test_nonpasses_and_waivers_never_turn_release_green(
                 "adapter_id": "two",
                 "outcome": outcome,
                 "reason": "coverage gap",
-                "waiver": {
-                    "accepted_by": "PIC",
-                    "reference": "decision",
-                    "reason": "gap",
-                },
             },
         ],
     }
     qualify.write_report(tmp_path, report)
-    assert qualify.load(tmp_path / "report.json")["release_qualified"] is False
+    assert qualify.load(tmp_path / "report.json")["full_catalog_passed"] is False
     assert "denominator: 2" in (tmp_path / "summary.md").read_text()
 
 
-def test_subset_is_never_a_release_pass(tmp_path, qualification_plan):
+def test_subset_is_never_a_full_catalog_pass(tmp_path, qualification_plan):
     report = {
         "scope": "developer_subset",
         "plan": qualification_plan,
@@ -184,7 +174,20 @@ def test_subset_is_never_a_release_pass(tmp_path, qualification_plan):
     }
     qualify.write_report(tmp_path, report)
     assert report["all_harnesses_passed"] is True
-    assert report["release_qualified"] is False
+    assert report["full_catalog_passed"] is False
+
+
+@pytest.mark.parametrize("state", ["completed", "running", "cancelled"])
+def test_full_catalog_pass_requires_completed_run(tmp_path, qualification_plan, state):
+    report = {
+        "scope": "full_catalog",
+        "state": state,
+        "plan": qualification_plan,
+        "adapters": [{"adapter_id": "one", "outcome": "passed"}],
+    }
+    qualify.write_report(tmp_path, report)
+    assert report["full_catalog_passed"] is (state == "completed")
+    assert "release_qualified" not in report
 
 
 def test_credential_is_transported_as_reference_and_logs_are_redacted(
@@ -444,7 +447,7 @@ def test_failed_host_environment_preserves_complete_report(
     report = qualify.load(output / "report.json")
     assert len(report["adapters"]) == len(qualification_plan["adapters"])
     assert all(row["outcome"] == "blocked" for row in report["adapters"])
-    assert report["release_qualified"] is False
+    assert report["full_catalog_passed"] is False
 
 
 @pytest.mark.usefixtures("clean_qualification_checkout")
@@ -536,7 +539,7 @@ def test_report_redaction_preserves_types_and_custom_credentials(
         '{"auths":{"registry":{"auth":"encoded-secret"}}}'
     )
     report = {
-        "scope": "release",
+        "scope": "full_catalog",
         "state": "completed",
         "plan": qualification_plan,
         "adapters": [
@@ -553,7 +556,7 @@ def test_report_redaction_preserves_types_and_custom_credentials(
     qualify.write_report(tmp_path, report)
     text = (tmp_path / "report.json").read_text()
     redacted = json.loads(text)
-    assert redacted["release_qualified"] is True
+    assert redacted["full_catalog_passed"] is True
     assert redacted["adapters"][0]["nested"] == [True, False, None, 1, "[REDACTED]"]
     assert "fake-access-key-id" not in text
     assert "fake-connection-string" not in text

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Plan and run a bounded Harbor -> Fabric -> harness release qualification."""
+"""Plan and run a bounded Harbor -> Fabric -> harness integration qualification."""
 
 from __future__ import annotations
 
@@ -347,12 +347,6 @@ def validate_plan(plan: dict) -> None:
             raise ValueError("invalid plan action")
         if row["action"] != "run" and not row.get("reason"):
             raise ValueError("non-run entries require a reason")
-        if row.get("waiver") and not all(
-            row["waiver"].get(key) for key in ("accepted_by", "reason", "reference")
-        ):
-            raise ValueError(
-                "waivers require an accepting person, reason, and decision reference"
-            )
         key = row.get("api_key_env")
         if key and (
             not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
@@ -923,8 +917,8 @@ def write_report(output: Path, report: dict) -> None:
     report["all_harnesses_passed"] = bool(rows) and all(
         row["outcome"] == "passed" for row in rows
     )
-    report["release_qualified"] = (
-        report["scope"] == "release"
+    report["full_catalog_passed"] = (
+        report["scope"] == "full_catalog"
         and report["all_harnesses_passed"]
         and report.get("state", "completed") == "completed"
     )
@@ -936,7 +930,7 @@ def write_report(output: Path, report: dict) -> None:
     )
     save(output / "report.json", sanitize_data(report, credential_names))
     lines = [
-        f"Harbor qualification: {'PASS' if report['release_qualified'] else 'NOT QUALIFIED'}",
+        f"Harbor qualification: {'PASS' if report['full_catalog_passed'] else 'NOT QUALIFIED'}",
         f"Scope: {report['scope']}; denominator: {len(rows)} catalog adapters",
         f"Mode: {report['plan']['mode']}; source: {report['plan']['source_sha']}",
         f"Task: {report['plan']['task']['name']}; SHA256: {report['plan']['task']['sha256']}",
@@ -977,7 +971,7 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
         "started_at": now(),
         "finished_at": None,
         "state": "running",
-        "scope": "developer_subset" if selected else "release",
+        "scope": "developer_subset" if selected else "full_catalog",
         "plan": {
             key: value
             for key, value in plan.items()
@@ -995,7 +989,6 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                 "reason": "Not reached",
                 "capabilities": row["capabilities"],
                 "registered_targets": row.get("registered_targets", []),
-                "waiver": row.get("waiver"),
                 "selected": {
                     "package": row["catalog"]["package"],
                     "descriptor_sha256": row["catalog"]["sha256"],
@@ -1288,7 +1281,7 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
     write_report(output, report)
     return (
         0
-        if report["release_qualified"]
+        if report["full_catalog_passed"]
         or (
             selected
             and all(
@@ -1323,7 +1316,7 @@ def main() -> None:
     plan.add_argument(
         "--catalog-json",
         type=Path,
-        help="Catalog resource extracted from the exact published catalog wheel; required when release stamping differs from checkout metadata",
+        help="Catalog resource extracted from the exact published catalog wheel; required when published package metadata differs from the checkout",
     )
     plan.add_argument("--bridge", choices=("native", "sdk"), default="native")
     plan.add_argument("--model", required=True)

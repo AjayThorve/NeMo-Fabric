@@ -11,13 +11,13 @@ Run from the repository root on Linux x86_64 with Git, Python 3.12 or newer, `uv
 
 Choose the exact NVIDIA NeMo Fabric package version and matching checkout/catalog, plus an exact Harbor version compatible with that NeMo Fabric line. The native Harbor `fabric` agent is the default; `--bridge sdk` explicitly tests `nemo_fabric.integrations.harbor:FabricAgent` instead. Record the distinction when comparing runs. Native Harbor and the SDK bridge are independently versioned implementations.
 
-`--mode registry` installs the exact published version. `--mode source` builds noneditable wheels from the recorded committed source, installs the same runtime wheel on host and task, and builds TypeScript tarballs from the checked-in lockfiles. Source mode qualifies source integration, not registry publication. Its local tarballs can satisfy package dependencies that are not published yet. Run registry mode against the candidate before treating registry installability as proven. Build logs and identities retain actual resolved harness versions; unpinned upstream ranges can resolve differently on another date.
+`--mode registry` installs the exact published version. `--mode source` builds noneditable wheels from the recorded committed source, installs the same runtime wheel on host and task, and builds TypeScript tarballs from the checked-in lockfiles. Source mode qualifies source integration, not registry publication. Its local tarballs can satisfy package dependencies that are not published yet. Run registry mode against the selected packages before treating registry installability as proven. Build logs and identities retain actual resolved harness versions; unpinned upstream ranges can resolve differently on another date.
 
-For a published beta or RC, pass `--catalog-json` with the catalog resource extracted from that exact catalog wheel. Release workflows stamp prerelease metadata in disposable checkouts, so the committed catalog can retain the stable base version. Keep the reference checkout at the intended release source: the gate still checks its complete adapter denominator and descriptor bytes against the candidate, then verifies the installed catalog's full hash. It preserves Python and npm versions independently (for example, `0.6.0rc1` and `0.6.0-rc.1`). To obtain the resource without importing any harness, run:
+For a published prerelease, pass `--catalog-json` with the catalog resource extracted from that exact catalog wheel. Published prerelease packages may use stamped metadata while the committed catalog can retain the stable base version. Keep the reference checkout at the matching source revision: the gate still checks its complete adapter denominator and descriptor bytes against the selected packages, then verifies the installed catalog's full hash. It preserves Python and npm versions independently (for example, `0.6.0rc1` and `0.6.0-rc.1`). To obtain the resource without importing any harness, run:
 
 ```bash
 uv tool run --from pip pip download --no-deps --only-binary=:all: \
-  --dest "$WORK/catalog" "nemo-fabric-adapter-catalog==$CANDIDATE_VERSION"
+  --dest "$WORK/catalog" "nemo-fabric-adapter-catalog==$PACKAGE_VERSION"
 python3 - "$WORK/catalog" <<'PY'
 from pathlib import Path
 from zipfile import ZipFile
@@ -29,7 +29,7 @@ with ZipFile(next(directory.glob('*.whl'))) as wheel:
 PY
 ```
 
-Use `--mode registry --version "$CANDIDATE_VERSION" --catalog-json "$WORK/catalog/catalog.json"` with the other plan arguments below. Use a fresh catalog directory per candidate.
+Use `--mode registry --version "$PACKAGE_VERSION" --catalog-json "$WORK/catalog/catalog.json"` with the other plan arguments below. Use a fresh catalog directory per package version.
 
 The denominator is every descriptor in the checked-in metadata catalog, including both NOOA variants and remote-agent. Generic NOOA requires registered workflow selection, which the standalone Harbor bridge does not transport; its catalog target IDs remain listed as unsupported coverage. The separate BenchAgent entry exercises standalone NOOA. Future catalog entries appear automatically and need a reviewed installation recipe/provider profile. They are not silently removed when no harness or credential is available. The builder derives Python extras and TypeScript optional peers from package manifests; a few harnesses deliberately installed outside adapter dependencies have explicit tested recipes in `prepare.py`. Review those recipes when the supported harness pins change.
 
@@ -44,7 +44,7 @@ A filesystem checkpoint path is not an inference API. Start with an existing ope
 
 Claude needs Anthropic Messages, Codex normally uses Responses, and most other local coding harnesses use Chat Completions. `--endpoint-kind openai-and-anthropic` permits the same endpoint to be attempted through both families. Droid's descriptor requires Factory and Kiro's requires Kiro; neither declares arbitrary model endpoints. Remote-agent requires a remote **agent** with access to the task workspace, not just an inference server. A single local checkpoint cannot override these adapter contracts.
 
-Hermes requires a supported preprovisioned task image. The source revision maintained in `just install-hermes-agent` needs Python 3.14 and explicitly rejects wheel/sdist builds. The development recipe uses editable installs and is not release-installation evidence. Do not set an unrelated build-system escape hatch to bypass that guard. Until a suitable supported image is available, retain the entry as blocked; an attempted unsupported installation is a recorded install failure, not a pass. A custom source image can include `/opt/qualification-harness-sources.json` mapping harness names to exact revisions, which the identity collector retains.
+Hermes requires a supported preprovisioned task image. The source revision maintained in `just install-hermes-agent` needs Python 3.14 and explicitly rejects wheel/sdist builds. The development recipe uses editable installs and does not verify noneditable installation. Do not set an unrelated build-system escape hatch to bypass that guard. Until a suitable supported image is available, retain the entry as blocked; an attempted unsupported installation is a recorded install failure, not a pass. A custom source image can include `/opt/qualification-harness-sources.json` mapping harness names to exact revisions, which the identity collector retains.
 
 The Codex profile uses `danger-full-access` and `deny_all` **inside the gate-created Harbor task container**. Harbor supplies the isolation boundary; nested `bwrap` sandboxing requires user namespaces that many Docker hosts prohibit. Do not reuse this profile on a host workspace or attach host credentials, Docker sockets, or unrelated files to the task. The gate never enables privileged Docker mode or changes host namespace policy.
 
@@ -104,7 +104,7 @@ A developer subset retains every other row as excluded and sets `scope=developer
   --output "$WORK/pi-reproduction" --only nvidia.fabric.pi
 ```
 
-Exit zero means the requested subset passed, or every entry passed in a full run. A subset never sets `release_qualified=true`. Nonzero means failure, blocked coverage, cancellation, or invalid prerequisites. A release waiver has the shape `{"accepted_by":"<actual human>","reason":"<coverage gap>","reference":"<decision URL or record>"}` on the relevant row. No default waiver is supplied and waived rows remain nonpasses.
+Exit zero means the requested subset passed, or every entry passed in a full run. A subset never sets `full_catalog_passed=true`. Nonzero means failure, blocked coverage, cancellation, or invalid prerequisites.
 
 ## Evidence And Triage
 
