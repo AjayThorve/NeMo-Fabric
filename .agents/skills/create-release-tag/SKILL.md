@@ -7,6 +7,8 @@ license: Apache-2.0
 
 # Create a Release Tag
 
+Before creating a tag, require the release PIC's exact-candidate Harbor qualification evidence or a documented release-owner waiver under [RELEASING.md](../../../RELEASING.md#harbor-integration-qualification). Use `qualify-harbor` to collect missing evidence. A subset or incomplete matrix is not a passing gate.
+
 Require the user to provide the stable release version in exact
 `<major>.<minor>.<patch>` form. Do not infer it from package metadata or a
 branch name, and do not edit package metadata while creating the tag.

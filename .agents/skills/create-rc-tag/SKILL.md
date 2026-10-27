@@ -7,6 +7,8 @@ license: Apache-2.0
 
 # Create an RC Tag
 
+Before creating a tag, require the release PIC's exact-candidate Harbor qualification evidence or a documented release-owner waiver under [RELEASING.md](../../../RELEASING.md#harbor-integration-qualification). Use `qualify-harbor` to collect missing evidence. A subset or incomplete matrix is not a passing gate.
+
 Create the tag only after the release branch has been created.
 
 ## Determine the version
