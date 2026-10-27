@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## Prerequisites And Scope
 
-Run from the repository root on Linux x86_64 with Git, Python 3.12 or newer, `uv`, Docker, and Docker Compose. The image builder preserves the selected task Docker environment and adds Node.js 24.16.0, Rust 1.94.0, and packaged Fabric/harness dependencies. The baseline task uses Python 3.13 on Debian Bookworm; custom tasks must provide a compatible Python 3.12+ Debian environment with pip and apt-get. It can download an isolated host Python interpreter through `uv`. Use a dedicated output directory on storage visible to the Docker daemon; Snap Docker needs a `TMPDIR` visible outside its private `/tmp`, as described in the [Harbor examples](../../../../examples/harbor/README.md#docker-installed-with-snap). Remote Docker daemons need the same absolute paths as the client. No host credential directories are mounted.
+Run from the repository root on Linux x86_64 with Git, Python 3.12 or newer, `uv`, Docker, and Docker Compose. The image builder preserves the selected task Docker environment and adds Node.js 24.16.0, Rust 1.94.0, and packaged NVIDIA NeMo Fabric and harness dependencies. The baseline task uses Python 3.13 on Debian Bookworm; custom tasks must provide a compatible Python 3.12+ Debian environment with pip and apt-get. It can download an isolated host Python interpreter through `uv`. Use a dedicated output directory on storage visible to the Docker daemon; Snap Docker needs a `TMPDIR` visible outside its private `/tmp`, as described in the [Harbor examples](../../../../examples/harbor/README.md#docker-installed-with-snap). Remote Docker daemons need the same absolute paths as the client. No host credential directories are mounted.
 
 Choose the exact NVIDIA NeMo Fabric package version and matching checkout/catalog, plus an exact Harbor version compatible with that NeMo Fabric line. The native Harbor `fabric` agent is the default; `--bridge sdk` explicitly tests `nemo_fabric.integrations.harbor:FabricAgent` instead. Record the distinction when comparing runs. Native Harbor and the SDK bridge are independently versioned implementations.
 
@@ -52,7 +52,7 @@ Estimate paid-provider cost before running, using the selected model's current p
 
 ## Plan, Prepare, And Run
 
-Run **one shared task across the harnesses**, never the full TB2 dataset. The baseline is [`kv-store-grpc`](https://github.com/harbor-framework/terminal-bench-2/tree/2fd12b88aafdd04a52c298e3940bcb189f9766d6/kv-store-grpc): dependency installation, protocol definition, generated code, server implementation, and a background service checked with real RPCs. Fetch the pinned task outside the Fabric checkout:
+Run **one shared task across the harnesses**, never the full TB2 dataset. The baseline is [`kv-store-grpc`](https://github.com/harbor-framework/terminal-bench-2/tree/2fd12b88aafdd04a52c298e3940bcb189f9766d6/kv-store-grpc): dependency installation, protocol definition, generated code, server implementation, and a background service checked with real RPCs. Fetch the pinned task outside the NeMo Fabric checkout:
 
 ```bash
 WORK=/path/to/private/qualification
@@ -62,7 +62,7 @@ git -C "$WORK/tb2" sparse-checkout set kv-store-grpc
 git -C "$WORK/tb2" checkout 2fd12b88aafdd04a52c298e3940bcb189f9766d6
 ```
 
-The gate requires `--task` pointing to that single directory. It records a hash of the task inputs and verifier, rejects a dataset root, and rejects changed files after planning. Preparation builds the task's original Dockerfile before adding Fabric and each harness. Harbor builds from the prepared image rather than pulling the task-only `docker_image`. The instruction, task assets, resources, and upstream verifier stay intact; the oracle solution is excluded from staging. A wrapper collects the agent's final package and selection evidence before running the upstream verifier, whose own dependency installation is outside the agent's execution. Task-installed packages may be added; changing an existing harness/runtime dependency fails identity verification. The original base and final image IDs are retained. This integration overlay is not an unmodified leaderboard submission.
+The gate requires `--task` pointing to that single directory. It records a hash of the task inputs and verifier, rejects a dataset root, and rejects changed files after planning. Preparation builds the task's original Dockerfile before adding NeMo Fabric and each harness. Harbor builds from the prepared image rather than pulling the task-only `docker_image`. The instruction, task assets, resources, and upstream verifier stay intact; the oracle solution is excluded from staging. A wrapper collects the agent's final package and selection evidence before running the upstream verifier, whose own dependency installation is outside the agent's execution. Task-installed packages may be added; changing an existing harness/runtime dependency fails identity verification. The original base and final image IDs are retained. This integration overlay is not an unmodified leaderboard submission.
 
 Set the version, compatible Harbor pin, served model ID, and container-reachable endpoint for your environment. The following example uses an already running local NIM endpoint and a nonsecret placeholder key:
 

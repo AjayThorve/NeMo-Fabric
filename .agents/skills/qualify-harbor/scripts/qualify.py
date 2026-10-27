@@ -53,12 +53,18 @@ def fingerprint(value: dict) -> str:
     ).hexdigest()
 
 
-def sanitize(text: str) -> str:
+def sanitize(text: str, credential_names: tuple[str, ...] = ()) -> str:
     for name, value in os.environ.items():
         if (
             value
             and len(value) >= 4
-            and re.search(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", name, re.I)
+            and (
+                name in credential_names
+                or name == "DOCKER_AUTH_CONFIG"
+                or re.search(
+                    r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)$", name, re.I
+                )
+            )
         ):
             text = text.replace(value, "[REDACTED]")
     text = re.sub(
@@ -67,6 +73,19 @@ def sanitize(text: str) -> str:
         text,
     )
     return re.sub(r"(https?://)[^/\s:@]+:[^/\s@]+@", r"\1[REDACTED]@", text)
+
+
+def sanitize_data(value: object, credential_names: tuple[str, ...]) -> object:
+    """Redact string values without changing JSON types or structure."""
+    if isinstance(value, str):
+        return sanitize(value, credential_names)
+    if isinstance(value, dict):
+        return {
+            key: sanitize_data(item, credential_names) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [sanitize_data(item, credential_names) for item in value]
+    return value
 
 
 def process_env(key_env: str | None = None) -> dict[str, str]:
@@ -97,8 +116,9 @@ def execute(
     cwd: Path | None = None,
 ) -> int:
     """Bound the entire process group; redact before writing persistent output."""
+    credential_names = (key_env,) if key_env else ()
     with log.open("a", encoding="utf-8") as stream:
-        stream.write(sanitize(shlex.join(command)) + "\n")
+        stream.write(sanitize(shlex.join(command), credential_names) + "\n")
         stream.flush()
         process = subprocess.Popen(
             command,
@@ -114,7 +134,7 @@ def execute(
         def drain() -> None:
             assert process.stdout is not None
             for line in process.stdout:
-                stream.write(sanitize(line))
+                stream.write(sanitize(line, credential_names))
                 stream.flush()
 
         reader = threading.Thread(target=drain, daemon=True)
@@ -555,7 +575,7 @@ def classify(text: str) -> str:
         ),
         (
             "auth",
-            r"unauthorized|authentication|api.key.*(missing|invalid|required)|401|403",
+            r"unauthorized|authentication|api.key.*(missing|invalid|required)|\b(?:401|403)\b",
         ),
         (
             "install",
@@ -563,12 +583,12 @@ def classify(text: str) -> str:
         ),
         (
             "provider_model",
-            r"model.*(not found|unknown|not supported)|404|messages.compatible|provider",
+            r"model.*(not found|unknown|not supported)|\b404\b|messages.compatible|provider",
         ),
         ("timeout", r"timeout|timed out|deadline"),
         (
             "infrastructure",
-            r"no space left|connection refused|docker.*(error|failed)|temporary failure|rate.limit|429|502|503",
+            r"no space left|connection refused|docker.*(error|failed)|temporary failure|rate.limit|\b(?:429|502|503)\b",
         ),
     ):
         if re.search(pattern, text, re.I):
@@ -885,7 +905,12 @@ def write_report(output: Path, report: dict) -> None:
         and report.get("state", "completed") == "completed"
     )
     report["updated_at"] = now()
-    save(output / "report.json", json.loads(sanitize(json.dumps(report))))
+    credential_names = tuple(
+        name
+        for row in [*rows, *report["plan"].get("adapters", [])]
+        if (name := row.get("selected", row).get("api_key_env"))
+    )
+    save(output / "report.json", sanitize_data(report, credential_names))
     lines = [
         f"Harbor qualification: {'PASS' if report['release_qualified'] else 'NOT QUALIFIED'}",
         f"Scope: {report['scope']}; denominator: {len(rows)} catalog adapters",
@@ -910,7 +935,7 @@ def write_report(output: Path, report: dict) -> None:
         ]
     )
     temporary = output / "summary.tmp"
-    temporary.write_text(sanitize("\n".join(lines) + "\n"))
+    temporary.write_text(sanitize("\n".join(lines) + "\n", credential_names))
     temporary.replace(output / "summary.md")
 
 
@@ -1219,7 +1244,9 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                         text = path.read_text(encoding="utf-8")
                     except UnicodeError:
                         continue
-                    cleaned = sanitize(text)
+                    cleaned = sanitize(
+                        text, (row["api_key_env"],) if row.get("api_key_env") else ()
+                    )
                     if cleaned != text:
                         path.write_text(cleaned, encoding="utf-8")
             result["finished_at"] = now()

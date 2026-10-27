@@ -48,6 +48,23 @@ def qualification_plan_fixture() -> dict:
     )
 
 
+@pytest.fixture(name="clean_qualification_checkout")
+def clean_qualification_checkout_fixture():
+    real_run = subprocess.run
+
+    def run_with_clean_checkout(command, *args, **kwargs):
+        if command[:2] == ["git", "diff"] or command[1:] == [
+            str(qualify.ROOT / "scripts/ci/generate_adapter_catalog.py"),
+            "--check",
+        ]:
+            return subprocess.CompletedProcess(command, 0)
+        return real_run(command, *args, **kwargs)
+
+    with patch.object(qualify.subprocess, "run", side_effect=run_with_clean_checkout):
+        yield
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
 def test_plan_uses_complete_catalog_and_distinguishes_prerequisites(qualification_plan):
     qualify.validate_plan(qualification_plan)
     catalog = qualify.load(qualify.ROOT / qualify.CATALOG)
@@ -59,6 +76,7 @@ def test_plan_uses_complete_catalog_and_distinguishes_prerequisites(qualificatio
     assert rows["nvidia.fabric.pi"]["capabilities"]["mcp"] == "untested"
 
 
+@pytest.mark.usefixtures("clean_qualification_checkout")
 def test_registry_prerelease_keeps_python_and_npm_versions_distinct(qualification_plan):
     plan = copy.deepcopy(qualification_plan)
     base = plan["version"]
@@ -97,6 +115,7 @@ def test_registry_prerelease_keeps_python_and_npm_versions_distinct(qualificatio
         "catalog_extra",
     ],
 )
+@pytest.mark.usefixtures("clean_qualification_checkout")
 def test_plan_rejects_incomplete_or_unattributable_coverage(
     qualification_plan, mutation
 ):
@@ -411,6 +430,7 @@ def test_source_task_uses_packed_installs_and_exact_runtime(qualification_plan):
     assert "-e /src" not in dockerfile
 
 
+@pytest.mark.usefixtures("clean_qualification_checkout")
 def test_failed_host_environment_preserves_complete_report(
     tmp_path, qualification_plan
 ):
@@ -427,6 +447,7 @@ def test_failed_host_environment_preserves_complete_report(
     assert report["release_qualified"] is False
 
 
+@pytest.mark.usefixtures("clean_qualification_checkout")
 def test_single_task_is_pinned_and_dataset_roots_are_rejected(
     tmp_path, qualification_plan
 ):
@@ -460,3 +481,114 @@ def test_task_package_installation_is_allowed_but_dependency_drift_is_rejected()
     assert qualify.unchanged_install(expected, observed)
     observed["packages"]["protobuf"] = "5.0.0"
     assert not qualify.unchanged_install(expected, observed)
+
+
+def test_dirty_checkout_is_rejected(tmp_path, qualification_plan):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    (repository / "crates").mkdir()
+    probe = repository / "crates/probe"
+    probe.write_text("committed\n")
+    subprocess.run(["git", "add", "crates/probe"], cwd=repository, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Qualification test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+        cwd=repository,
+        check=True,
+    )
+    plan = copy.deepcopy(qualification_plan)
+    plan["source_sha"] = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repository, text=True
+    ).strip()
+    probe.write_text("dirty\n")
+    catalog = qualify.ROOT / qualify.CATALOG
+    with (
+        patch.object(qualify, "ROOT", repository),
+        patch.object(qualify, "CATALOG", catalog),
+    ):
+        with pytest.raises(subprocess.CalledProcessError) as error:
+            qualify.validate_plan(plan)
+    assert error.value.cmd[:2] == ["git", "diff"]
+
+
+def test_report_redaction_preserves_types_and_custom_credentials(
+    tmp_path, qualification_plan
+):
+    os.environ["MODEL_API_KEY"] = "true"
+    os.environ["BROKER_CREDENTIAL_HANDLE"] = "opaque-custom-secret"
+    os.environ["DOCKER_AUTH_CONFIG"] = (
+        '{"auths":{"registry":{"auth":"encoded-secret"}}}'
+    )
+    report = {
+        "scope": "release",
+        "state": "completed",
+        "plan": qualification_plan,
+        "adapters": [
+            {
+                "adapter_id": "one",
+                "outcome": "passed",
+                "selected": {"api_key_env": "BROKER_CREDENTIAL_HANDLE"},
+                "reason": "opaque-custom-secret " + os.environ["DOCKER_AUTH_CONFIG"],
+                "nested": [True, False, None, 1, "true"],
+            }
+        ],
+    }
+    qualify.write_report(tmp_path, report)
+    text = (tmp_path / "report.json").read_text()
+    redacted = json.loads(text)
+    assert redacted["release_qualified"] is True
+    assert redacted["adapters"][0]["nested"] == [True, False, None, 1, "[REDACTED]"]
+    assert "opaque-custom-secret" not in text
+    assert os.environ["DOCKER_AUTH_CONFIG"] not in text
+    assert "opaque-custom-secret" not in (tmp_path / "summary.md").read_text()
+
+
+def test_custom_credential_is_redacted_before_log_write(tmp_path):
+    os.environ["BROKER_CREDENTIAL_HANDLE"] = "opaque-custom-secret"
+    log = tmp_path / "process.log"
+    assert (
+        qualify.execute(
+            [
+                sys.executable,
+                "-c",
+                "import os; print(os.environ['BROKER_CREDENTIAL_HANDLE'])",
+            ],
+            log,
+            10,
+            key_env="BROKER_CREDENTIAL_HANDLE",
+        )
+        == 0
+    )
+    assert "opaque-custom-secret" not in log.read_text()
+    assert "[REDACTED]" in log.read_text()
+
+
+@pytest.mark.parametrize(
+    "text,category",
+    [
+        ("status=401", "auth"),
+        ("HTTP 403", "auth"),
+        ("HTTP 404", "provider_model"),
+        ("HTTP 429", "infrastructure"),
+        ("HTTP 502", "infrastructure"),
+        ("HTTP 503", "infrastructure"),
+        ("run-1401-1403-1404-1429-1502-1503", "transport_runner"),
+        ("id_401_403_404_429_502_503", "transport_runner"),
+    ],
+)
+def test_http_codes_do_not_match_inside_identifiers(text, category):
+    assert qualify.classify(text) == category
