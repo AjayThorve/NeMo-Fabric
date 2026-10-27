@@ -64,6 +64,7 @@ _config = partial(
                 "setting_sources": ["user", "project", "local"],
                 "max_budget_usd": 1.5,
                 "max_buffer_size": 33554432,
+                "reasoning_effort": "max",
                 "permission_mode": "dontAsk",
             },
             id="claude",
@@ -75,7 +76,7 @@ _config = partial(
                 "approval_mode": "deny_all",
                 "developer_instructions": "Review the implementation.",
                 "personality": "pragmatic",
-                "reasoning_effort": "high",
+                "reasoning_effort": "ultra",
                 "service_tier": "priority",
                 "output_schema": {
                     "type": "object",
@@ -362,6 +363,24 @@ def test_openclaw_rejects_relay(tmp_path: Path):
         ),
         pytest.param(
             "nvidia.fabric.claude",
+            {"reasoning_effort": "ultra"},
+            "harness.settings.reasoning_effort",
+            id="claude-effort-value",
+        ),
+        pytest.param(
+            "nvidia.fabric.claude",
+            {"reasoning_effort": True},
+            "harness.settings.reasoning_effort",
+            id="claude-effort-type",
+        ),
+        pytest.param(
+            "nvidia.fabric.claude",
+            {"effort": "max"},
+            "harness.settings.effort",
+            id="claude-legacy-effort-key",
+        ),
+        pytest.param(
+            "nvidia.fabric.claude",
             {"permission_mode": False},
             "harness.settings.permission_mode",
             id="claude-permission-mode-type",
@@ -407,6 +426,12 @@ def test_openclaw_rejects_relay(tmp_path: Path):
             {"reasoning_effort": False},
             "harness.settings.reasoning_effort",
             id="codex-reasoning-effort",
+        ),
+        pytest.param(
+            "nvidia.fabric.codex",
+            {"reasoning_effort": "unknown"},
+            "harness.settings.reasoning_effort",
+            id="codex-reasoning-effort-value",
         ),
         pytest.param(
             "nvidia.fabric.codex",
