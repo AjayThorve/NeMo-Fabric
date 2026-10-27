@@ -96,9 +96,9 @@ def sanitize_data(value: object, credential_names: tuple[str, ...]) -> object:
 def sanitize_artifact(text: str, suffix: str, credential_names: tuple[str, ...]) -> str:
     """Preserve machine-readable trial evidence when scrubbing credential values."""
     if suffix in {".jsonl", ".ndjson"}:
-        return "".join(
-            sanitize_artifact(line, ".json", credential_names)
-            for line in text.splitlines(keepends=True)
+        return "\n".join(
+            sanitize_artifact(line, ".json", credential_names).removesuffix("\n")
+            for line in text.split("\n")
         )
     if suffix == ".json":
         try:

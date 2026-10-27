@@ -613,3 +613,16 @@ def test_artifact_redaction_preserves_machine_readable_evidence(suffix):
         assert objects[1] == {"flag": False, "count": 1}
     os.environ["MODEL_API_KEY"] = "different-secret"
     assert qualify.sanitize_artifact(text, suffix, ("MODEL_API_KEY",)) == text
+
+
+@pytest.mark.parametrize("suffix", [".jsonl", ".ndjson"])
+def test_jsonl_redaction_keeps_unicode_separators_inside_records(suffix):
+    secret = "prefix\u2028suffix"
+    os.environ["MODEL_API_KEY"] = secret
+    records = [{"credential": secret, "flag": True}, {"text": "other\u2028text"}]
+    original = "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n"
+    cleaned = qualify.sanitize_artifact(original, suffix, ("MODEL_API_KEY",))
+    assert secret not in cleaned
+    assert cleaned.endswith("\n")
+    parsed = [json.loads(line) for line in cleaned.split("\n") if line]
+    assert parsed == [{"credential": "[REDACTED]", "flag": True}, records[1]]
