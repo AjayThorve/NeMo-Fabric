@@ -38,10 +38,9 @@ The OpenHands recipe uses the adapter's documented compatible stack:
 `mcp==1.28.1`. Newer incompatible LiteLLM/MCP combinations can surface as an
 SDK service-unavailable error before any provider request. Inspect retained
 stderr and installed versions before attributing that error to inference.
-The image also pins its existing gRPC/protobuf dependencies to `grpcio==1.73.0`
-and `protobuf==6.33.6`, compatible with the original baseline task's required
-gRPC install, and runs `pip check`. This prevents task setup from changing an
-already inspected harness dependency. Identity drift remains a failure.
+The image runs `pip check`. Task dependencies such as gRPC/protobuf resolve
+normally; their observed versions remain in the evidence without becoming
+extra pins or integration pass criteria.
 
 ## Serve A Local Checkpoint Or Select A Provider
 
@@ -72,7 +71,7 @@ git -C "$WORK/tb2" sparse-checkout set kv-store-grpc
 git -C "$WORK/tb2" checkout 2fd12b88aafdd04a52c298e3940bcb189f9766d6
 ```
 
-The gate requires `--task` pointing to that single directory. It records a hash of the task inputs and verifier, rejects a dataset root, and rejects changed files after planning. Preparation builds the task's original Dockerfile before adding NeMo Fabric and each harness. Harbor builds from the prepared image rather than pulling the task-only `docker_image`. The instruction, task assets, resources, and upstream verifier stay intact; the oracle solution is excluded from staging. A wrapper collects the agent's final package and selection evidence before running the upstream verifier, whose own dependency installation is outside the agent's execution. Task-installed packages may be added; changing an existing harness/runtime dependency fails identity verification. The original base and final image IDs are retained. This integration overlay is not an unmodified leaderboard submission.
+The gate requires `--task` pointing to that single directory. It records a hash of the task inputs and verifier, rejects a dataset root, and rejects changed files after planning. Preparation builds the task's original Dockerfile before adding NeMo Fabric and each harness. Harbor builds from the prepared image rather than pulling the task-only `docker_image`. The instruction, task assets, resources, and upstream verifier stay intact; the oracle solution is excluded from staging. A wrapper collects the agent's final package and selection evidence before running the upstream verifier, whose own dependency installation is outside the agent's execution. Fabric package/wheel identity, installed Python harness distributions, npm harness packages, interpreter/source identity, catalog and descriptor provenance remain protected. Other Python package changes are recorded, allowing task setup to install or replace its own dependencies. If such changes break execution, lifecycle/result checks still fail. The original base and final image IDs are retained. This integration overlay is not an unmodified leaderboard submission.
 
 Set the version, compatible Harbor pin, served model ID, and container-reachable endpoint for your environment. The following example uses an already running local NIM endpoint and a nonsecret placeholder key:
 

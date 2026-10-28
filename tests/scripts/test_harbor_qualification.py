@@ -502,9 +502,10 @@ def test_openhands_install_uses_the_documented_compatible_sdk_stack(
     dockerfile = adapter_dockerfile(qualification_plan, row, "qualification-base:exact")
     assert (
         'pip install "openhands-sdk==1.50.0" "openhands-tools==1.50.0" '
-        '"litellm==1.100.1" "mcp==1.28.1" '
-        '"grpcio==1.73.0" "protobuf==6.33.6" && pip check'
+        '"litellm==1.100.1" "mcp==1.28.1" && pip check'
     ) in dockerfile
+    assert '"grpcio==' not in dockerfile
+    assert '"protobuf==' not in dockerfile
 
 
 @pytest.mark.usefixtures("clean_qualification_checkout")
@@ -554,15 +555,22 @@ def test_single_task_is_pinned_and_dataset_roots_are_rejected(
         qualify.validate_plan(changed)
 
 
-def test_task_package_installation_is_allowed_but_dependency_drift_is_rejected():
+@pytest.mark.parametrize("changed", ["nemo-fabric-runtime", "openhands-sdk"])
+def test_task_dependencies_can_change_but_fabric_and_harness_identity_cannot(changed):
     expected = {
         "editable": [],
-        "packages": {"nemo-fabric-runtime": "0.6.0", "protobuf": "6.33.0"},
+        "packages": {
+            "nemo-fabric-runtime": "0.6.0",
+            "openhands-sdk": "1.50.0",
+            "protobuf": "6.33.0",
+        },
     }
     observed = copy.deepcopy(expected)
     observed["packages"]["grpcio-tools"] = "1.73.0"
     assert qualify.unchanged_install(expected, observed)
     observed["packages"]["protobuf"] = "5.0.0"
+    assert qualify.unchanged_install(expected, observed)
+    observed["packages"][changed] = "different"
     assert not qualify.unchanged_install(expected, observed)
 
 

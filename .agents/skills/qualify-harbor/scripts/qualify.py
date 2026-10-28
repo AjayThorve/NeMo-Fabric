@@ -243,7 +243,7 @@ def stage_task(plan: dict, destination: Path, image: str) -> None:
 
 
 def unchanged_install(expected: dict, observed: dict) -> bool:
-    """Task-installed packages may be added; existing runtime dependencies may not drift."""
+    """Protect Fabric/harness identity; record other task dependency changes only."""
     if observed.get("editable"):
         return False
     for key, value in expected.items():
@@ -251,6 +251,17 @@ def unchanged_install(expected: dict, observed: dict) -> bool:
             if any(
                 observed.get(key, {}).get(name) != version
                 for name, version in value.items()
+                if name.startswith("nemo-fabric")
+                or name
+                in {
+                    "deepagents",
+                    "mini-swe-agent",
+                    "nooa",
+                    "nooa-bench",
+                    "nooa-cli",
+                    "openhands-sdk",
+                    "openhands-tools",
+                }
             ):
                 return False
         elif observed.get(key) != value:
@@ -748,7 +759,7 @@ def inspect_results(
         if not summary["checks"]["task_install_identity"]:
             fail(
                 "adapter_admission",
-                "Task identity differs from inspected image or has editable installs",
+                "Fabric/harness identity differs from inspected image or has editable installs",
             )
     except (OSError, ValueError, KeyError, TypeError) as error:
         fail("adapter_admission", f"Task identity unavailable: {error}")
