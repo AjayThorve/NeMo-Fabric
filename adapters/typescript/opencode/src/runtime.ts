@@ -21,12 +21,18 @@ export interface OpenCodePromptOutcome {
 export interface OpenCodeSessionHandle {
   id: string;
   check(level: CheckLevel): Promise<AdapterCheckResult>;
-  prompt(text: string): Promise<OpenCodePromptOutcome>;
+  prompt(text: string, deadlineMillis?: number | null): Promise<OpenCodePromptOutcome>;
   stop(): Promise<void>;
 }
 
 export interface OpenCodeSessionFactory {
   create(input: AdapterStartInput): Promise<OpenCodeSessionHandle>;
+}
+
+export class OpenCodePromptFailure extends LifecycleError {
+  constructor(readonly usage: AgentUsage) {
+    super("opencode_session_failed", "OpenCode session communication failed", { retryable: false });
+  }
 }
 
 function failed(
@@ -128,9 +134,10 @@ export class OpenCodeAdapterRuntime implements AdapterRuntime {
     try {
       let outcome: OpenCodePromptOutcome;
       try {
-        outcome = await session.prompt(request.input);
+        outcome = await session.prompt(request.input, context.deadline_millis);
       } catch (error) {
         await this.invalidate(session);
+        if (error instanceof OpenCodePromptFailure) return failed(error.code, error.message, error.usage);
         if (error instanceof LifecycleError) {
           throw error;
         }

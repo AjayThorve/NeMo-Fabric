@@ -2037,6 +2037,97 @@
           ]
         },
         "contract_version": "fabric.adapter/v1alpha2",
+        "extension_schemas": {
+          "usage": {
+            "additionalProperties": false,
+            "properties": {
+              "nvidia.fabric.opencode.usage_evidence.v1": {
+                "additionalProperties": false,
+                "properties": {
+                  "gaps": {
+                    "items": {
+                      "enum": [
+                        "scope_unverified",
+                        "missing_usage",
+                        "unfinished_work"
+                      ]
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "observed": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "cached_input_tokens": {
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "input_tokens": {
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "output_tokens": {
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "reasoning_tokens": {
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "total_tokens": {
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "scope_reasons": {
+                    "description": "Bounded reasons invocation ownership or completion could not be proved; contains no native messages, commands, or credentials.",
+                    "items": {
+                      "enum": [
+                        "observer_unavailable",
+                        "observer_lost",
+                        "configuration_changed",
+                        "prepare_scope_read_failed",
+                        "unsupported_configuration",
+                        "root_execution_unconfirmed",
+                        "title_completion_unconfirmed",
+                        "final_scope_read_failed",
+                        "child_ancestry_unverified",
+                        "child_ownership_changed",
+                        "manual_session_change",
+                        "tool_result_unavailable",
+                        "background_shell",
+                        "background_subagent",
+                        "unsupported_protocol",
+                        "auxiliary_generation",
+                        "unsupported_request_kind",
+                        "prompt_failed",
+                        "unfinished_work"
+                      ]
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "observed",
+                  "gaps"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "nvidia.fabric.opencode.usage_evidence.v1"
+            ],
+            "type": "object"
+          }
+        },
         "model_schema": {
           "additionalProperties": false,
           "allOf": [
@@ -2138,7 +2229,7 @@
         "name": "nemo-fabric-adapters-opencode",
         "version": "0.6.0"
       },
-      "sha256": "805000dba39244d6e33cacfd228660f73ba0c2854aa7d8813cef8479eea67b20",
+      "sha256": "8cb126e7d382bb58fc3447166a7d5f858ae2af14118aa1533bf7ae6f4c206495",
       "source": "adapters/typescript/opencode/opencode.fabric-adapter.json"
     },
     "nvidia.fabric.openhands": {

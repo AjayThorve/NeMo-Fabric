@@ -96,6 +96,8 @@ const expectedByPackage = {
     "dist/opencode-sdk.js",
     "dist/runtime.d.ts",
     "dist/runtime.js",
+    "dist/usage.d.ts",
+    "dist/usage.js",
     "opencode.fabric-adapter.json",
     "package.json",
   ],
