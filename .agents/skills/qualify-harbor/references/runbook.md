@@ -98,6 +98,14 @@ For a keyed HTTPS provider, export `MODEL_API_KEY` securely, use its model slug 
 
 For an OpenAI-compatible endpoint with a vendor-prefixed served ID, set that row’s `model_provider` to `openai` without changing `model`. This requires the SDK bridge containing [PR #522](https://github.com/NVIDIA/NeMo-Fabric/pull/522); generate the plan with `--bridge sdk`. Native Harbor’s equivalent option is deferred to a separate upstream change. The selected provider is retained in both admission input and the report. Older SDKs remain usable when the override is omitted.
 
+For adapter-declared model settings, use the SDK bridge and set that plan row's
+`model_settings` object. It projects to `fabric_model_settings` and remains
+subject to the adapter model schema. For example, an explicitly unpriced
+Mini-SWE model uses `{"cost_tracking":"disabled"}` with a positive `max_turns`
+on the same row. This disables monetary budgeting and keeps cost unavailable;
+it does not report a zero cost. `max_turns` projects to `fabric_max_turns`.
+The bridge and runner must both contain the model-settings transport from #522.
+
 A developer subset retains every other row as excluded and sets `scope=developer_subset`:
 
 ```bash

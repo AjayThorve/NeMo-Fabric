@@ -380,6 +380,18 @@ def validate_plan(plan: dict) -> None:
                     validate_settings(child)
 
         validate_settings(row["harness_settings"])
+        model_settings = row.get("model_settings")
+        if model_settings is not None:
+            if plan["bridge"] != "sdk" or not isinstance(model_settings, dict):
+                raise ValueError("model_settings requires an object and the SDK bridge")
+            validate_settings(model_settings)
+        max_turns = row.get("max_turns")
+        if max_turns is not None and (
+            isinstance(max_turns, bool)
+            or not isinstance(max_turns, int)
+            or max_turns <= 0
+        ):
+            raise ValueError("max_turns must be a positive integer")
         url = row.get("base_url")
         if url:
             parsed = urlsplit(url)
@@ -564,6 +576,10 @@ def harbor_command(
     }
     if row.get("model_provider") is not None:
         options["fabric_model_provider"] = row["model_provider"]
+    if row.get("model_settings") is not None:
+        options["fabric_model_settings"] = row["model_settings"]
+    if row.get("max_turns") is not None:
+        options["fabric_max_turns"] = row["max_turns"]
     if row.get("base_url"):
         options["fabric_model_base_url"] = row["base_url"]
     if row.get("api_key_env"):
@@ -684,6 +700,8 @@ def selection_payload(plan: dict, row: dict) -> dict:
         if row.get("model_provider") is not None
         else {}
     )
+    if row.get("model_settings") is not None:
+        provider_options["model_settings"] = row["model_settings"]
     config = build_harbor_config(
         adapter_id=row["adapter_id"],
         workspace="/app",
@@ -692,6 +710,7 @@ def selection_payload(plan: dict, row: dict) -> dict:
         model_base_url=row.get("base_url"),
         model_api_key_env=row.get("api_key_env"),
         timeout_seconds=plan["runtime_timeout_seconds"],
+        max_turns=row.get("max_turns"),
         enabled_tools=row.get("enabled_tools"),
         telemetry=row["telemetry"],
         discovery_paths=tuple(paths),
@@ -1019,6 +1038,8 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                     "base_url": row.get("base_url"),
                     "api_key_env": row.get("api_key_env"),
                     "harness_settings": row["harness_settings"],
+                    "model_settings": row.get("model_settings"),
+                    "max_turns": row.get("max_turns"),
                     "telemetry": row["telemetry"],
                 },
             }

@@ -640,6 +640,65 @@ def test_provider_override_rejects_invalid_values(qualification_plan, provider):
 
 
 @pytest.mark.usefixtures("clean_qualification_checkout")
+@pytest.mark.parametrize("max_turns", [0, -1, True, 1.5, "10"])
+def test_rejects_invalid_turn_bound(qualification_plan, max_turns):
+    qualification_plan["adapters"][0]["max_turns"] = max_turns
+    with pytest.raises(ValueError, match="max_turns must be"):
+        qualify.validate_plan(qualification_plan)
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
+def test_model_settings_require_sdk_and_reject_credentials(qualification_plan):
+    row = qualification_plan["adapters"][0]
+    row["model_settings"] = {"cost_tracking": "disabled"}
+    with pytest.raises(ValueError, match="model_settings requires"):
+        qualify.validate_plan(qualification_plan)
+    qualification_plan["bridge"] = "sdk"
+    row["model_settings"] = {"api_key": "credential"}
+    with pytest.raises(ValueError, match="credentials belong"):
+        qualify.validate_plan(qualification_plan)
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
+def test_model_settings_and_bound_match_command_selection_and_report(
+    qualification_plan, tmp_path
+):
+    qualification_plan["bridge"] = "sdk"
+    row = next(
+        r
+        for r in qualification_plan["adapters"]
+        if r["adapter_id"] == "nvidia.fabric.mini-swe-agent"
+    )
+    row.update(model_settings={"cost_tracking": "disabled"}, max_turns=100)
+    qualify.validate_plan(qualification_plan)
+    command = qualify.harbor_command(
+        qualification_plan, row, "python", tmp_path, tmp_path, "trial"
+    )
+    assert 'fabric_model_settings={"cost_tracking": "disabled"}' in command
+    assert "fabric_max_turns=100" in command
+    payload = qualify.selection_payload(qualification_plan, row)
+    assert payload["config"]["models"]["default"]["settings"] == row["model_settings"]
+    assert payload["config"]["runtime"]["max_turns"] == 100
+    assert (
+        qualify.run(
+            qualification_plan,
+            {"plan": qualification_plan},
+            tmp_path / "out",
+            [row["adapter_id"]],
+        )
+        == 1
+    )
+    report = qualify.load(tmp_path / "out/report.json")
+    selected = next(
+        r["selected"]
+        for r in report["adapters"]
+        if r["adapter_id"] == row["adapter_id"]
+    )
+    assert selected["model_settings"] == row["model_settings"]
+    assert selected["max_turns"] == 100
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
 def test_provider_override_preserves_model_in_command_selection_and_report(
     qualification_plan, tmp_path, monkeypatch
 ):
