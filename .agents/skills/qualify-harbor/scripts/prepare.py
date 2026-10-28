@@ -189,7 +189,10 @@ def adapter_dockerfile(plan: dict, row: dict, base: str) -> str:
             lines.append("RUN npm install --prefix /opt/harness " + " ".join(specs))
     # These harnesses deliberately are not dependencies of their adapter packages.
     installs = {
-        "nvidia.fabric.openhands": 'pip install "openhands-sdk==1.50.0" "openhands-tools==1.50.0"',
+        "nvidia.fabric.openhands": (
+            'pip install "openhands-sdk==1.50.0" "openhands-tools==1.50.0" '
+            '"litellm==1.100.1" "mcp==1.28.1"'
+        ),
         "nvidia.fabric.openclaw": "npm install --global openclaw@2026.9.4 --allow-scripts=openclaw",
         "nvidia.fabric.cline": "npm install --prefix /opt/harness @cline/sdk@0.0.83",
         "nvidia.fabric.strands": "npm install --global @strands-agents/cli@0.2.1",

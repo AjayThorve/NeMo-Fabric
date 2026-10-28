@@ -1048,7 +1048,10 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
     save(output / "plan.json", plan)
     host_python = environment.get("python")
     if not host_python or not Path(host_python).is_file():
-        for row in report["adapters"]:
+        for row, planned in zip(report["adapters"], plan["adapters"]):
+            if planned["action"] != "run":
+                row.update(outcome=planned["action"], reason=planned["reason"])
+                continue
             row["reason"] = (
                 "Host installation unavailable; inspect environment.json and base/host installation logs"
             )

@@ -434,6 +434,24 @@ def test_source_task_uses_packed_installs_and_exact_runtime(qualification_plan):
 
 
 @pytest.mark.usefixtures("clean_qualification_checkout")
+@pytest.mark.parametrize("mode", ["source", "registry"])
+def test_openhands_install_uses_the_documented_compatible_sdk_stack(
+    qualification_plan, mode
+):
+    qualification_plan["mode"] = mode
+    row = next(
+        row
+        for row in qualification_plan["adapters"]
+        if row["adapter_id"] == "nvidia.fabric.openhands"
+    )
+    dockerfile = adapter_dockerfile(qualification_plan, row, "qualification-base:exact")
+    assert (
+        'pip install "openhands-sdk==1.50.0" "openhands-tools==1.50.0" '
+        '"litellm==1.100.1" "mcp==1.28.1"'
+    ) in dockerfile
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
 def test_failed_host_environment_preserves_complete_report(
     tmp_path, qualification_plan
 ):
@@ -446,7 +464,13 @@ def test_failed_host_environment_preserves_complete_report(
     )
     report = qualify.load(output / "report.json")
     assert len(report["adapters"]) == len(qualification_plan["adapters"])
-    assert all(row["outcome"] == "blocked" for row in report["adapters"])
+    for row, planned in zip(report["adapters"], qualification_plan["adapters"]):
+        if planned["action"] == "run":
+            assert row["outcome"] == "blocked"
+            assert row["reason"].startswith("Host installation unavailable")
+        else:
+            assert row["outcome"] == planned["action"]
+            assert row["reason"] == planned["reason"]
     assert report["full_catalog_passed"] is False
 
 
