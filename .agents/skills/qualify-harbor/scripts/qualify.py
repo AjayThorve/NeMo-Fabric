@@ -723,7 +723,7 @@ def inspect_results(
     job: Path, row: dict, expected_identity: dict, expected_selection: dict
 ) -> dict:
     """Keep transport, reward, selection, usage and telemetry as separate evidence."""
-    summary = {"checks": {}, "failures": [], "evidence": []}
+    summary = {"checks": {}, "failures": [], "limitations": [], "evidence": []}
 
     def fail(category: str, reason: str) -> None:
         summary["failures"].append({"category": category, "reason": sanitize(reason)})
@@ -731,11 +731,14 @@ def inspect_results(
     # Verifier evidence remains meaningful even when result transport fails.
     try:
         reward_path = one(job, "*/verifier/reward.txt")
-        summary["reward"] = float(reward_path.read_text().strip())
+        reward = float(reward_path.read_text().strip())
+        if not math.isfinite(reward):
+            raise ValueError("Task reward is not finite")
+        summary["reward"] = reward
+        summary["checks"]["verifier_completed"] = True
         summary["checks"]["task_success"] = summary["reward"] == 1.0
-        if not summary["checks"]["task_success"]:
-            fail("harbor_verifier", "Task verifier did not award 1.0")
     except (OSError, ValueError) as error:
+        summary["checks"]["verifier_completed"] = False
         fail("harbor_verifier", str(error))
     try:
         task_identity = load(one(job, "*/verifier/qualification-identity.json"))
@@ -853,9 +856,8 @@ def inspect_results(
         )
         summary["checks"]["usage_available"] = known
         if not known:
-            fail(
-                "usage",
-                "Invocation token usage is unavailable; do not infer zero usage",
+            summary["limitations"].append(
+                "Harness complete token usage is unavailable; unknown counters remain unknown"
             )
         metadata = context.get("metadata", {}).get("fabric", {})
         summary["checks"]["harbor_result_transport"] = metadata.get(
@@ -879,9 +881,8 @@ def inspect_results(
             and expected_usage["n_input_tokens"] + expected_usage["n_output_tokens"]
             == 0
         ):
-            fail(
-                "usage",
-                "No positive inference usage was reported for the model-backed task",
+            summary["limitations"].append(
+                "Harness reported no positive inference usage; accounting does not establish model activity"
             )
         if row["telemetry"] == "relay":
             validation = load(one(job, "*/agent/telemetry-validation.json"))
@@ -959,6 +960,9 @@ def write_report(output: Path, report: dict) -> None:
         and report.get("state", "completed") == "completed"
     )
     report["updated_at"] = now()
+    report["pass_criteria"] = (
+        "integration; task reward and harness usage availability are informational"
+    )
     credential_names = tuple(
         name
         for row in [*rows, *report["plan"].get("adapters", [])]
@@ -971,19 +975,22 @@ def write_report(output: Path, report: dict) -> None:
         f"Mode: {report['plan']['mode']}; source: {report['plan']['source_sha']}",
         f"Task: {report['plan']['task']['name']}; SHA256: {report['plan']['task']['sha256']}",
         "",
-        "| Adapter | Outcome | Classification / reason |",
-        "| --- | --- | --- |",
+        "| Adapter | Integration | Task reward | Classification / limitations |",
+        "| --- | --- | --- | --- |",
     ]
     for row in rows:
         reason = row.get("reason") or "; ".join(
             f"{f['category']}: {f['reason']}" for f in row.get("failures", [])
         )
+        reason = "; ".join(filter(None, [reason, *row.get("limitations", [])]))
+        reward = row.get("reward", "n/a")
         lines.append(
-            f"| {row['adapter_id']} | {row['outcome']} | {reason.replace('|', '/').replace(chr(10), ' ')[:600]} |"
+            f"| {row['adapter_id']} | {row['outcome']} | {reward} | {reason.replace('|', '/').replace(chr(10), ' ')[:600]} |"
         )
     lines.extend(
         [
             "",
+            "Integration pass requires lifecycle, provenance, result/accounting transport and cleanup. Task reward and harness usage availability are informational; missing verifier evidence remains a failure.",
             "Reproduce with the recorded commands and retained environment/plan. Raw task artifacts are private; inspect and redact before sharing.",
             "MCP, skills, subagents and telemetry are untested unless explicitly exercised; one task does not establish benchmark or all-feature equivalence.",
         ]

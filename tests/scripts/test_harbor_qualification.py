@@ -361,9 +361,12 @@ def qualification_job_fixture(tmp_path, qualification_plan):
     "mutation,category",
     [
         ("none", None),
-        ("reward", "harbor_verifier"),
+        ("reward", None),
+        ("missing_reward", "harbor_verifier"),
+        ("invalid_reward", "harbor_verifier"),
+        ("nonfinite_reward", "harbor_verifier"),
         ("identity", "adapter_admission"),
-        ("usage", "usage"),
+        ("usage", None),
         ("counter", "usage"),
         ("source_origin", "adapter_admission"),
         ("fingerprint", "adapter_admission"),
@@ -376,11 +379,21 @@ def test_result_checks_remain_independent(qualification_job, mutation, category)
     job, row, identity, result, selection = qualification_job
     if mutation == "reward":
         (job / "trial/verifier/reward.txt").write_text("0")
+    elif mutation == "missing_reward":
+        (job / "trial/verifier/reward.txt").unlink()
+    elif mutation == "invalid_reward":
+        (job / "trial/verifier/reward.txt").write_text("invalid")
+    elif mutation == "nonfinite_reward":
+        (job / "trial/verifier/reward.txt").write_text("nan")
     elif mutation == "identity":
         identity = {"editable": ["runtime"]}
     elif mutation == "usage":
         result["usage"] = None
         qualify.save(job / "trial/agent/fabric-result-one.json", result)
+        trial = qualify.load(job / "trial/result.json")
+        trial["agent_result"]["n_input_tokens"] = None
+        trial["agent_result"]["n_output_tokens"] = None
+        qualify.save(job / "trial/result.json", trial)
     elif mutation == "counter":
         trial = qualify.load(job / "trial/result.json")
         trial["agent_result"]["n_input_tokens"] = 999
@@ -407,6 +420,48 @@ def test_result_checks_remain_independent(qualification_job, mutation, category)
     assert {failure["category"] for failure in summary["failures"]} == (
         {category} if category else set()
     )
+
+
+@pytest.mark.parametrize("known_usage", [True, False])
+@pytest.mark.parametrize("transport_matches", [True, False])
+@pytest.mark.usefixtures("requires_harbor")
+def test_task_failure_and_usage_limit_do_not_mask_transport_failure(
+    qualification_job, qualification_plan, known_usage, transport_matches
+):
+    job, row, identity, result, selection = qualification_job
+    (job / "trial/verifier/reward.txt").write_text("0")
+    if not known_usage:
+        result["usage"] = None
+        qualify.save(job / "trial/agent/fabric-result-one.json", result)
+    trial = qualify.load(job / "trial/result.json")
+    trial["agent_result"]["n_input_tokens"] = 12 if known_usage else None
+    trial["agent_result"]["n_output_tokens"] = 3 if known_usage else None
+    if not transport_matches:
+        trial["agent_result"]["n_input_tokens"] = 999
+    qualify.save(job / "trial/result.json", trial)
+    summary = qualify.inspect_results(job, row, identity, selection)
+    assert summary["checks"]["task_success"] is False
+    assert summary["checks"]["verifier_completed"] is True
+    assert summary["checks"]["usage_available"] is known_usage
+    assert bool(summary["limitations"]) is not known_usage
+    assert {f["category"] for f in summary["failures"]} == (
+        set() if transport_matches else {"usage"}
+    )
+    summary.update(
+        adapter_id=row["adapter_id"],
+        outcome="failed" if summary["failures"] else "passed",
+    )
+    report = {
+        "scope": "developer_subset",
+        "plan": qualification_plan,
+        "adapters": [summary],
+    }
+    qualify.write_report(job, report)
+    assert report["all_harnesses_passed"] is transport_matches
+    assert report["full_catalog_passed"] is False
+    text = (job / "summary.md").read_text()
+    assert "Task reward" in text
+    assert "| 0.0 |" in text
 
 
 @pytest.mark.usefixtures("requires_harbor")

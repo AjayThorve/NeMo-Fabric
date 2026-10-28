@@ -126,6 +126,20 @@ A developer subset retains every other row as excluded and sets `scope=developer
 
 Exit zero means the requested subset passed, or every entry passed in a full run. A subset never sets `full_catalog_passed=true`. Nonzero means failure, blocked coverage, cancellation, or invalid prerequisites.
 
+The gate tests integration, not model task quality. A valid reward of zero does
+not fail a completed Harbor/Fabric/harness round trip. The report keeps task
+reward and `checks.task_success` as informational evidence. Missing, malformed,
+or nonfinite reward evidence still fails verifier completion; Harbor exceptions,
+failed invocations, timeouts, and cleanup failures remain failures.
+
+Harness accounting availability is a separate capability observation. Missing
+complete counters remain unknown, with a recorded limitation; they do not fail
+integration when Fabric transports the same normalized unknown values into
+Harbor. `checks.usage_available` is informational. A mismatch in result identity
+or accounting transport still fails, regardless of reward or usage availability.
+Reports record these pass criteria explicitly and show reward alongside the
+integration outcome. A subset cannot establish full-catalog coverage.
+
 ## Evidence And Triage
 
 `report.json` is the sanitized machine summary; `summary.md` is the human matrix. Both are rewritten atomically after each row, with pending rows retained if interrupted. `plan.json` retains the full descriptor snapshot. Each attempted row includes a reproducible command, timestamps, image identity, host/task package and harness versions, runtime wheel hash, observed runtime/invocation/adapter identity, reward, usage, capability limitations, and cleanup status. Catalog hashes cover raw metadata; Harbor admission hashes cover the core-normalized descriptor. The gate records both and compares the uploaded admission hash against SDK metadata inspection, never directly against the raw catalog hash. Raw task artifacts stay in the private run directory. The gate redacts known credential values from text output, but binary artifacts and unknown secrets are not shareable by assumption; inspect before exporting them.
@@ -140,8 +154,8 @@ Use the failure categories to choose the next investigation:
 | Auth/provider/model | Endpoint protocol, exact served ID, credential environment reference, harness error code, and task's model config |
 | Adapter admission/fingerprint | Selected catalog SHA, uploaded `fabric-run-*.json`, installed descriptor, package versions, task identity |
 | Transport/runner | Harbor trial exception, `agent/fabric-result-*.json` or runner-error envelope, runner stdout/stderr |
-| Harbor lifecycle/verifier | Trial `result.json`, `exception_info`, verifier output, reward file; reward zero and missing reward are distinct failures |
-| Usage | Invocation usage and Harbor accounting; unknown is not zero, reward success does not prove usage transport |
+| Harbor lifecycle/verifier | Trial `result.json`, `exception_info`, verifier output, reward file; valid reward zero is an informational task outcome, missing/invalid reward is a failure |
+| Usage | Invocation usage and Harbor accounting; missing complete counters are a harness limitation, transport mismatches fail; unknown is not zero |
 | Telemetry/export | Relay validation, canonical ATIF schema, promoted `trajectory.json`, artifacts; baseline runs do not test telemetry |
 | Timeout/cancellation/cleanup | Recorded deadline/exit code, partial logs, owned Compose resources and `cleanup.log` |
 | Infrastructure | Connectivity, image fetch/build, storage exhaustion, server/rate-limit errors; reproduce before declaring a product regression |
