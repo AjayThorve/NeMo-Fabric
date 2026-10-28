@@ -2218,7 +2218,7 @@ wheels = [
 
 [[package]]
 name = "nemo-fabric"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "sdk/python/nemo-fabric" }
 dependencies = [
     { name = "nemo-fabric-runtime" },
@@ -2286,12 +2286,12 @@ provides-extras = ["claude", "codex", "streaming", "deepagents", "mini-swe-agent
 
 [[package]]
 name = "nemo-fabric-adapter-catalog"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "sdk/python/nemo-fabric-adapter-catalog" }
 
 [[package]]
 name = "nemo-fabric-adapter-contract"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapter-contract/python" }
 
 [package.metadata]
@@ -2300,7 +2300,7 @@ provides-extras = ["pydantic"]
 
 [[package]]
 name = "nemo-fabric-adapters-claude"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/claude" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
@@ -2328,7 +2328,7 @@ provides-extras = ["harness", "full"]
 
 [[package]]
 name = "nemo-fabric-adapters-codex"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/codex" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
@@ -2356,7 +2356,7 @@ provides-extras = ["harness", "full"]
 
 [[package]]
 name = "nemo-fabric-adapters-common"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/common" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
@@ -2367,7 +2367,7 @@ requires-dist = [{ name = "nemo-fabric-adapter-contract", editable = "adapter-co
 
 [[package]]
 name = "nemo-fabric-adapters-deepagents"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/deepagents" }
 dependencies = [
     { name = "langchain-mcp-adapters" },
@@ -2410,7 +2410,7 @@ provides-extras = ["harness", "relay", "full"]
 
 [[package]]
 name = "nemo-fabric-adapters-hermes"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/hermes" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
@@ -2430,7 +2430,7 @@ provides-extras = ["relay", "full"]
 
 [[package]]
 name = "nemo-fabric-adapters-mini-swe-agent"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/mini-swe-agent" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
@@ -2461,7 +2461,7 @@ provides-extras = ["harness", "relay", "full"]
 
 [[package]]
 name = "nemo-fabric-adapters-nooa"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/nooa" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract", marker = "python_full_version >= '3.12' and python_full_version < '3.14'" },
@@ -2502,7 +2502,7 @@ provides-extras = ["harness", "relay", "full"]
 
 [[package]]
 name = "nemo-fabric-adapters-openclaw"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/openclaw" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
@@ -2519,7 +2519,7 @@ requires-dist = [
 
 [[package]]
 name = "nemo-fabric-adapters-openhands"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/openhands" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
@@ -2534,7 +2534,7 @@ requires-dist = [
 
 [[package]]
 name = "nemo-fabric-adapters-remote-agent"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "adapters/python/remote-agent" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
@@ -2552,7 +2552,7 @@ provides-extras = ["harness", "full"]
 
 [[package]]
 name = "nemo-fabric-collector"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "sdk/python/nemo-fabric-collector" }
 dependencies = [
     { name = "starlette", version = "1.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
