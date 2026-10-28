@@ -105,6 +105,7 @@ def prepare_claude_relay(payload: dict[str, Any]):
         adapter._selected_model_config(config),
         runtime_context(payload),
         payload["base_dir"],
+        settings=adapter._settings(config),
     )
 
 
@@ -188,6 +189,27 @@ def test_claude_descriptor_is_narrow_and_versioned():
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "properties": {
+                "insecure_http_model_hosts": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 253,
+                        "anyOf": [
+                            {
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$"
+                            },
+                            {
+                                "pattern": "^[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*$",
+                                "format": "ipv6",
+                            },
+                        ],
+                    },
+                    "uniqueItems": True,
+                    "description": "Hosts trusted for credential-free HTTP model forwarding through NeMo Relay "
+                    ">=0.11.0; no schemes, ports, paths, wildcards, brackets, or zone "
+                    "identifiers.",
+                },
                 "setting_sources": {
                     "type": "array",
                     "items": {
@@ -549,8 +571,7 @@ async def test_claude_invoke_passes_remaining_budget_to_query(
     after = loop.time()
     invocation_deadline = remaining_timeout.call_args.args[0]
     expected_timeout = (
-        claude_payload["runtime_context"]["deadline_millis"] / 1000
-        - time.time()
+        claude_payload["runtime_context"]["deadline_millis"] / 1000 - time.time()
     )
     assert (
         before + expected_timeout - 0.1
@@ -709,7 +730,6 @@ def test_prepare_claude_relay_writes_gateway_config_and_complete_hook_plugin(
         "PreToolUse",
         "PostToolUse",
         "PostToolUseFailure",
-        "PermissionRequest",
         "SubagentStart",
         "SubagentStop",
         "Notification",
@@ -726,12 +746,12 @@ def test_prepare_claude_relay_writes_gateway_config_and_complete_hook_plugin(
         "hooks": [
             {
                 "type": "command",
-                "command": f"{executable_arg} hook-forward claude",
-                "timeout": 30,
+                "command": f"{executable_arg} hook-forward claude --fail-open",
+                "timeout": 45,
             }
         ]
     }
-    assert hooks["PermissionRequest"][0]["matcher"] == "*"
+    assert "PermissionRequest" not in hooks
 
 
 def test_prepare_claude_relay_rejects_v2_observability_config(
@@ -2165,3 +2185,62 @@ def test_main_serves_persistent_runtime(monkeypatch):
     serve.assert_called_once_with(
         adapter.ClaudeRuntime, config_loader=AgentConfig.from_mapping
     )
+
+
+@pytest.mark.parametrize("hosts", [["MODEL.TEST."], []])
+def test_claude_relay_propagates_explicit_http_model_hosts(
+    relay_payload, monkeypatch, tmp_path, hosts
+):
+    relay_payload["config"]["harness"]["settings"]["insecure_http_model_hosts"] = hosts
+    monkeypatch.setattr(
+        adapter.relay_gateway,
+        "resolve_relay_command",
+        MagicMock(return_value=tmp_path / "nemo-relay"),
+    )
+    monkeypatch.setattr(
+        adapter.relay_gateway,
+        "relay_cli_contract",
+        MagicMock(
+            return_value=adapter.relay_gateway.RelayCliContract(version=(0, 11, 0))
+        ),
+    )
+    monkeypatch.setattr(adapter, "_stage_relay_plugin", MagicMock())
+    relay = prepare_claude_relay(relay_payload)
+    with relay.gateway.config_path.open("rb") as stream:
+        config = tomllib.load(stream)
+    assert config["upstream"]["insecure_http_model_hosts"] == (
+        ["model.test"] if hosts else []
+    )
+    assert config["agents"]["claude"]["command"] == "claude"
+
+
+@pytest.mark.parametrize(
+    ("hosts", "version", "message"),
+    [
+        (["model.test:80"], (0, 11, 0), "insecure_http_model_hosts"),
+        (["model.test"], (0, 10, 4), ">=0.11.0"),
+        ([], (0, 10, 4), ">=0.11.0"),
+    ],
+)
+def test_claude_relay_reports_invalid_or_unsupported_http_model_hosts(
+    relay_payload, monkeypatch, tmp_path, hosts, version, message
+):
+    relay_payload["config"]["harness"]["settings"]["insecure_http_model_hosts"] = hosts
+    monkeypatch.setattr(
+        adapter.relay_gateway,
+        "resolve_relay_command",
+        MagicMock(return_value=tmp_path / "nemo-relay"),
+    )
+    monkeypatch.setattr(
+        adapter.relay_gateway,
+        "relay_cli_contract",
+        MagicMock(return_value=adapter.relay_gateway.RelayCliContract(version=version)),
+    )
+    write_configs = MagicMock()
+    monkeypatch.setattr(adapter.common_utils, "write_relay_configs", write_configs)
+    with pytest.raises(adapter.AdapterRelayError, match=message) as caught:
+        prepare_claude_relay(relay_payload)
+
+    assert caught.value.code == "claude_relay_invalid_http_model_hosts"
+    assert isinstance(caught.value.__cause__, adapter.RelayHttpModelError)
+    write_configs.assert_not_called()
