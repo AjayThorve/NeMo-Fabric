@@ -84,6 +84,27 @@ session. Runtime startup calls `ClineCore.start()` without a prompt. Every invoc
 session, disposes the core, and removes runtime-scoped state. Independent
 NeMo Fabric runtimes do not share Cline state.
 
+## Usage evidence
+
+Results from `ClineCore.send()` retain positive input, output, cache-read, and
+cache-write counts in `RunResult.usage.metadata["nvidia.fabric.cline.usage_evidence.v1"]`.
+The `observed` object holds these Cline counts. The `gaps` list identifies
+missing or unverified usage. Cline can fill unavailable counts with zero, so a
+zero in the Cline SDK result does not prove that the provider reported zero.
+
+When the selected provider is `nvidia` and `base_url` is set, the adapter captures
+model requests through Cline's configured HTTP hook during each send. It sets
+input, output, and total token counts only when every captured request returns
+valid terminal usage that does not conflict with nonzero SDK counts. A zero
+reported by the provider stays zero. The OpenAI-compatible input count includes
+cache reads, and its output count includes reasoning tokens. The adapter reports
+cache reads only when the provider supplies that count. If a request fails,
+omits usage, or follows an unexpected path, complete counts remain
+unknown and the observations stay available. Other Cline providers return
+observations with unverified coverage. Provider-reported cost remains unknown.
+Harbor uses complete counts when present and retains observations in NeMo Fabric
+result metadata.
+
 The adapter accepts no Cline-specific `harness.settings`. Unsupported
 normalized fields, unknown settings, unknown built-in tool names, authenticated
 MCP configuration, and MCP tool allowlists or blocklists fail instead of being
