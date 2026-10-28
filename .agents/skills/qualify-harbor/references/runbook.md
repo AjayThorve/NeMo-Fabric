@@ -38,6 +38,10 @@ The OpenHands recipe uses the adapter's documented compatible stack:
 `mcp==1.28.1`. Newer incompatible LiteLLM/MCP combinations can surface as an
 SDK service-unavailable error before any provider request. Inspect retained
 stderr and installed versions before attributing that error to inference.
+The image also pins its existing gRPC/protobuf dependencies to `grpcio==1.73.0`
+and `protobuf==6.33.6`, compatible with the original baseline task's required
+gRPC install, and runs `pip check`. This prevents task setup from changing an
+already inspected harness dependency. Identity drift remains a failure.
 
 ## Serve A Local Checkpoint Or Select A Provider
 
