@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nemo-fabric-adapters-nooa"
-version = "0.7.0"
+version = "0.6.0"
 description = "NOOA adapters for NeMo Fabric"
 authors = [
   { name = "NVIDIA Corporation" },
@@ -25,12 +25,12 @@ license-files = ["LICENSE"]
 readme = "pypi.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-  "nemo-fabric-adapter-contract == 0.7.0",
-  "nemo-fabric-adapters-common == 0.7.0",
+  "nemo-fabric-adapter-contract == 0.6.0",
+  "nemo-fabric-adapters-common == 0.6.0",
 ]
 
 [project.optional-dependencies]
-# NOOA 0.0.10 needs relay_compat.py with Relay 0.9 and 0.10. Remove the shim when
+# NOOA 0.0.10 needs relay_compat.py with Relay 0.11. Remove the shim when
 # updating these pins to a compatible NOOA release (issue #347).
 harness = [
   "fsspec>=2026.6.0",
@@ -39,14 +39,14 @@ harness = [
   "nooa-bench>=0.0.10,<0.0.11",
 ]
 relay = [
-  "nemo-relay>=0.9,<0.11",
+  "nemo-relay>=0.11,<0.12",
 ]
 full = [
   "fsspec>=2026.6.0",
   "nooa>=0.0.10,<0.0.11",
   "nooa-cli>=0.0.10,<0.0.11",
   "nooa-bench>=0.0.10,<0.0.11",
-  "nemo-relay>=0.9,<0.11",
+  "nemo-relay>=0.11,<0.12",
 ]
 
 [project.urls]

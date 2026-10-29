@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nemo_fabric_adapters.common.relay_version import is_supported_relay_version
+from nemo_fabric_adapters.common.relay_version import is_supported_relay_cli_version
 
 
 # Readiness includes plugin preflight and worker startup before health is served.
@@ -100,12 +100,15 @@ def relay_cli_contract(executable: Path) -> RelayCliContract:
         raise RelayGatewayError("NeMo Relay CLI version could not be determined")
     major, minor, patch = (int(value) for value in match.groups()[:3])
     version = (major, minor, patch)
-    if match.group(4) is not None or not is_supported_relay_version(version):
+    if match.group(4) is not None or not is_supported_relay_cli_version(version):
         raise RelayGatewayError(
             "unsupported NeMo Relay CLI version "
             f"{'.'.join(str(value) for value in version)}; "
-            "NeMo Fabric requires >=0.9.0,<0.11.0"
+            "NeMo Fabric requires >=0.9.0,<0.12.0"
         )
+    from nemo_fabric_adapters.common.provenance import record_version
+
+    record_version("nemo-relay", match.group(0), "adapter:relay_startup_version", role="relay", origin="observed")
     return RelayCliContract(version=version)
 
 

@@ -8,8 +8,9 @@ SPDX-License-Identifier: Apache-2.0
 This directory contains committed JSON Schema snapshots for the public NeMo Fabric
 contract. The files are generated from the Rust core types, not edited by hand.
 
-The Python adapter-contract package exposes dependency-free dataclasses with
-optional Pydantic interoperability. Those models are hand-maintained against
+The Python adapter-contract package exposes standard-library dataclasses with
+optional Pydantic interoperability. Shared evidence types and validation live in
+`nemo-fabric-evidence`, consumed by both the SDK and adapter contract. Those models are hand-maintained against
 these Rust-generated schemas. The TypeScript adapter-contract package generates
 compile-time declarations from the committed schema snapshots. When a
 schema-backed Rust type changes, update each applicable language binding and
@@ -17,11 +18,13 @@ its parity tests in the same change.
 
 ## Directory Layout
 
-The core schema generator separates the southbound adapter contract from
-consumer and NeMo Fabric runtime schemas:
+The core schema generator separates shared evidence, the southbound adapter
+contract, and northbound SDK and runtime schemas:
 
 ```text
 schemas/
+├── evidence/                  # Shared by northbound and southbound consumers
+│   └── execution-evidence.schema.json
 ├── sdk/                       # Northbound SDK and runtime contract
 │   ├── agent.schema.json
 │   ├── run-plan.schema.json
@@ -40,9 +43,10 @@ schemas/
     └── openai-stream-record.schema.json
 ```
 
-An adapter author can treat `adapter-contract/` as the complete schema entry
-point. Contract versions remain explicit fields in the wire format rather than
-directory names.
+Adapter-facing request, result and transport schemas live in `adapter-contract/`.
+Shared software evidence lives in `evidence/`, alongside the northbound schemas
+in `sdk/`. Contract versions remain explicit fields in the wire format rather
+than directory names.
 
 Start with the
 [adapter contract overview](https://github.com/NVIDIA/NeMo-Fabric/blob/main/docs/adapter-contract/README.md)
@@ -51,7 +55,7 @@ shapes; do not reconstruct the contract from examples.
 
 The language bindings preserve this boundary:
 
-- Python adapters use `nemo-fabric-adapter-contract` for dependency-free
+- Python adapters use `nemo-fabric-adapter-contract` for standard-library
   dataclasses and optional Pydantic models.
 - TypeScript adapters use `nemo-fabric-adapter-contract` for the descriptor,
   configuration, runtime-context, request, and result types, matching the
@@ -164,8 +168,8 @@ Run `cargo test` after regenerating schemas. The snapshot tests compare the
 committed files against the schemas generated from the current Rust types and
 fail on accidental drift.
 
-Regenerate the TypeScript projection after an intentional adapter-contract
-schema change:
+Regenerate the TypeScript projection after an intentional adapter-contract or
+shared evidence schema change:
 
 ```bash
 just generate-typescript-contract
@@ -179,3 +183,17 @@ fixtures, package contents, and clean-consumer imports.
 `system_stats` in `sdk/run-result` contains a monotonic adapter exchange duration, before/after observations of the executing adapter host process tree, and an optional CPU counter difference estimate. Its `ResourceObservation` definition is tagged by `status`: `available` carries a snapshot; `unavailable` and `unsupported` carry a reason. Endpoint memory is not peak memory. A missing estimate is unknown, not zero. The compatible `resource_snapshot` field repeats the final available snapshot. These northbound additions do not change the adapter result contract.
 
 `system_stats` in `sdk/agent` and `sdk/run-plan` defaults to all endpoint metric groups when omitted; explicit null disables invocation collection and its artifacts and must survive serialization. `SystemStatsConfig.collect` selects `process`, `cgroup.cpu`, `cgroup.memory`, and `cgroup.pressure`; empty, duplicate, and unknown selections are rejected. Optional nested `sampling` enables bounded native series with `interval_ms` and `max_samples`. The config is northbound-only. `collected_groups` records the selection; `not_collected` distinguishes excluded sources from selected-but-unavailable evidence. Unselected process reductions and an entirely excluded cgroup block are omitted; the final legacy `resource_snapshot` is independent. The result adds scoped cgroup endpoint measurements and sampled gauge/CPU reductions with explicit coverage and retention diagnostics. Numeric `Measurement` values distinguish available, unlimited limits, unavailable, and unsupported evidence. Samples and summaries use `fabric.system_stats/v1alpha1` and carry existing execution IDs. Provider lifetime high-water, summed process RSS, and invocation sampled peak have separate meanings.
+
+## Shared Evidence
+
+`evidence/execution-evidence` defines selected software inventories and
+infrastructure reports shared by SDK configuration, SDK results and private
+adapter lifecycle responses. The standalone schema is generated from the Rust
+core types. Both Python packages consume the shared `nemo-fabric-evidence`
+models; the TypeScript adapter-contract package bundles a byte-identical schema
+copy and its generated types as a consumer. Its existing package exports remain
+unchanged.
+
+`sdk/run-result.execution` is optional. `sdk/agent.provenance` controls collection and carries explicit caller reports through existing dispatch. Optional evidence is decoded defensively; invalid reports become coverage gaps. The strict `AgentConfig`, `AgentRunRequest`, `AgentRunResult` and `RuntimeContext` shapes and adapter wire version are unchanged.
+
+Evidence receivers additionally enforce report byte/aggregate entry budgets, unique context keys and infrastructure references to existing contexts. These cross-field limits supplement the JSON Schema's closed shapes, non-blank identities, observation and coverage constraints.

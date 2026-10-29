@@ -141,6 +141,49 @@ def test_cline_reported_usage_reaches_harbor_with_evidence(result_path):
             None,
         ),
         ({"metadata": {"estimated_cost_usd": 0.25}}, None, None),
+        pytest.param(
+            {
+                "input_tokens": 127,
+                "cached_input_tokens": 22,
+                "input_tokens_include_cache": True,
+                "output_tokens": 33,
+                "total_tokens": 160,
+                "metadata": {
+                    "nvidia.fabric.opencode.usage_evidence.v1": {
+                        "observed": {
+                            "input_tokens": 127,
+                            "output_tokens": 33,
+                            "total_tokens": 160,
+                            "cached_input_tokens": 22,
+                            "reasoning_tokens": 6,
+                        },
+                        "gaps": [],
+                    }
+                },
+            },
+            127,
+            22,
+            id="opencode-complete-inclusive",
+        ),
+        pytest.param(
+            {
+                "metadata": {
+                    "nvidia.fabric.opencode.usage_evidence.v1": {
+                        "observed": {
+                            "input_tokens": 127,
+                            "output_tokens": 33,
+                            "total_tokens": 160,
+                            "cached_input_tokens": 22,
+                            "reasoning_tokens": 6,
+                        },
+                        "gaps": ["unfinished_work"],
+                    }
+                }
+            },
+            None,
+            None,
+            id="opencode-partial-observations",
+        ),
     ],
 )
 def test_cache_semantics_and_unknown_values(

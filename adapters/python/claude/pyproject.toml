@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nemo-fabric-adapters-claude"
-version = "0.7.0"
+version = "0.6.0"
 description = "Claude adapter for NeMo Fabric"
 authors = [
   { name = "NVIDIA Corporation" },
@@ -25,19 +25,19 @@ license-files = ["LICENSE"]
 readme = "pypi.md"
 requires-python = ">=3.11"
 dependencies = [
-  "nemo-fabric-adapter-contract == 0.7.0",
-  "nemo-fabric-adapters-common == 0.7.0",
+  "nemo-fabric-adapter-contract == 0.6.0",
+  "nemo-fabric-adapters-common == 0.6.0",
   "tomli-w~=1.2",
 ]
 
 [project.optional-dependencies]
 harness = [
-  "claude-agent-sdk==0.2.165",
-  "nemo-relay-cli-bin>=0.9,<0.11",
+  "claude-agent-sdk==0.2.166",
+  "nemo-relay-cli-bin>=0.9,<0.12",
 ]
 full = [
-  "claude-agent-sdk==0.2.165",
-  "nemo-relay-cli-bin>=0.9,<0.11",
+  "claude-agent-sdk==0.2.166",
+  "nemo-relay-cli-bin>=0.9,<0.12",
 ]
 
 [project.urls]
