@@ -5,6 +5,8 @@ SPDX-License-Identifier: Apache-2.0
 
 # Harbor Qualification Runbook
 
+When invoked as an agent skill, start with [interactive setup](setup.md): choose a shared BYOM endpoint or individual provider credentials, resolve compatible routes, and preview coverage. The commands below are the replayable execution reference. The agent generates and validates the plan; a user does not need to hand-edit the per-adapter examples.
+
 ## Prerequisites And Scope
 
 Run from the repository root on Linux x86_64 with Git, Python 3.12 or newer, `uv`, Docker, and Docker Compose. The image builder preserves the selected task Docker environment and adds Node.js 24.16.0, Rust 1.94.0, and packaged NVIDIA NeMo Fabric and harness dependencies. The baseline task image uses Python 3.13 on Debian Bookworm; that is not a Fabric or Harbor version pin. Select any compatible installed interpreter for each component. Custom tasks must provide a compatible Debian environment with pip and apt-get. It can download an isolated host Python interpreter through `uv`. Use a dedicated output directory on storage visible to the Docker daemon; Snap Docker needs a `TMPDIR` visible outside its private `/tmp`, as described in the [Harbor examples](../../../../examples/harbor/README.md#docker-installed-with-snap). Remote Docker daemons need the same absolute paths as the client. No host credential directories are mounted.
