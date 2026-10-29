@@ -68,3 +68,132 @@ def test_old_result_decodes_and_optional_evidence_round_trips():
     assert broken.status == "succeeded"
     assert broken.output == "ok"
     assert not broken.execution.software_environments[0].complete
+
+
+def test_busy_collector_does_not_permanently_replace_the_sdk_snapshot(monkeypatch):
+    from unittest.mock import MagicMock
+    from nemo_fabric import Fabric
+    from nemo_fabric_adapter_contract.evidence import ExecutionEvidence
+    import nemo_fabric.provenance as module
+
+    available = ExecutionEvidence.from_mapping(
+        json.loads(
+            (Path(__file__).parents[1] / "fixtures/provenance/report.json").read_text()
+        )
+    )
+    available.software_environments[0].participants = ["caller_sdk"]
+    mock_snapshot = MagicMock(
+        side_effect=[ExecutionEvidence.gap("caller_sdk", "collector_busy"), available]
+    )
+    monkeypatch.setattr(module, "sdk_snapshot", mock_snapshot)
+    config = FabricConfig.from_mapping(
+        {"metadata": {"name": "busy"}, "harness": {"adapter_id": "test.adapter"}}
+    )
+    fabric = Fabric()
+    first = fabric._with_provenance(config)
+    assert first.provenance.reports.software_environments[0].reason == "collector_busy"
+    second = fabric._with_provenance(config)
+    third = fabric._with_provenance(config)
+    assert second.provenance.reports.to_mapping() == available.to_mapping()
+    assert third.provenance.reports.to_mapping() == available.to_mapping()
+    assert mock_snapshot.call_count == 2
+
+
+async def test_runtime_reuses_initialization_snapshots_across_invocations(
+    hermes_shim_agent_dir, tmp_path, monkeypatch
+):
+    import sys
+    from nemo_fabric import Fabric
+
+    monkeypatch.setenv("ADAPTER_PYTHON", sys.executable)
+    config = FabricConfig.from_mapping(
+        {
+            "metadata": {"name": "software-runtime"},
+            "harness": {
+                "adapter_id": "test.fabric.hermes_shim",
+                "resolution": "preinstalled",
+            },
+            "discovery": {"local_paths": ["adapters"]},
+            "runtime": {"artifacts": str(tmp_path / "artifacts")},
+        }
+    )
+    fabric = Fabric()
+    async with await fabric.start_runtime(
+        config, base_dir=hermes_shim_agent_dir
+    ) as runtime:
+        first = await runtime.invoke(input="first")
+        second = await runtime.invoke(input="second")
+    assert first.status == second.status == "succeeded"
+    assert first.invocation_id != second.invocation_id
+    assert first.execution.to_mapping() == second.execution.to_mapping()
+    participants = {
+        p for env in first.execution.software_environments for p in env.participants
+    }
+    assert {"caller_sdk", "core", "adapter"} <= participants
+    core = next(
+        env
+        for env in first.execution.software_environments
+        if "core" in env.participants
+    )
+    assert core.entries[0].version.value
+
+
+async def test_disable_skips_host_and_adapter_metadata_work(
+    hermes_shim_agent_dir, tmp_path, monkeypatch
+):
+    import sys
+    from nemo_fabric import Fabric
+    import nemo_fabric.provenance as sdk_provenance
+
+    def unexpected(participant):
+        raise AssertionError("host collector ran while disabled")
+
+    monkeypatch.setenv("ADAPTER_PYTHON", sys.executable)
+    marker = tmp_path / "lookups"
+    adapter = next(
+        hermes_shim_agent_dir.glob(
+            "adapters/*/src/nemo_fabric_test_adapters/*/adapter.py"
+        )
+    )
+    source = adapter.read_text()
+    assert source.count("    lifecycle.serve(ShimRuntime)") == 1
+    adapter.write_text(
+        source.replace(
+            "    lifecycle.serve(ShimRuntime)",
+            """    import importlib.metadata
+    original = importlib.metadata.distribution
+    def lookup(name):
+        Path("""
+            + repr(str(marker))
+            + """).write_text(name)
+        return original(name)
+    importlib.metadata.distribution = lookup
+    lifecycle.serve(ShimRuntime)""",
+        )
+    )
+    config = FabricConfig.from_mapping(
+        {
+            "metadata": {"name": "disabled-software"},
+            "harness": {
+                "adapter_id": "test.fabric.hermes_shim",
+                "resolution": "preinstalled",
+            },
+            "discovery": {"local_paths": ["adapters"]},
+            "runtime": {"artifacts": str(tmp_path / "artifacts")},
+            "provenance": {"enabled": True},
+        }
+    )
+    enabled = await Fabric().run(
+        config, base_dir=hermes_shim_agent_dir, input="positive control"
+    )
+    assert enabled.status == "succeeded"
+    assert marker.read_text()
+    marker.unlink()
+    monkeypatch.setattr(sdk_provenance, "sdk_snapshot", unexpected)
+    config.provenance.enabled = False
+    result = await Fabric().run(
+        config, base_dir=hermes_shim_agent_dir, input="still executes"
+    )
+    assert result.status == "succeeded"
+    assert result.execution is None
+    assert not marker.exists()
