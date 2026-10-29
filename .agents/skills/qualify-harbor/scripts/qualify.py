@@ -465,7 +465,7 @@ def make_plan(args: argparse.Namespace) -> dict:
     prerequisites = {
         "nvidia.fabric.hermes": "Requires a supported Hermes runtime/source image; select its compatible task_python and record pinned, clean source provenance.",
         "nvidia.fabric.remote-agent": "Requires an explicitly configured compatible HTTP endpoint/profile; workspace/tool execution is separate coverage.",
-        "nvidia.fabric.kiro": "Requires Kiro CLI and KIRO_API_KEY with a Kiro-advertised provider/model; arbitrary inference endpoints are unsupported.",
+        "nvidia.fabric.kiro": "Requires Kiro CLI, KIRO_API_KEY, and a Kiro-advertised provider/model. Skip when KIRO_API_KEY is absent; BYOM is unsupported.",
         "nvidia.fabric.droid": "Requires Factory authentication or a prepared native Droid BYOK profile/image; custom endpoints use native settings, not model base_url.",
     }
     for adapter_id, record in sorted(catalog["adapters"].items()):
@@ -513,7 +513,9 @@ def make_plan(args: argparse.Namespace) -> dict:
                 "registered_targets": targets,
                 "model": args.model,
                 "base_url": args.base_url,
-                "api_key_env": args.api_key_env,
+                "api_key_env": "KIRO_API_KEY"
+                if adapter_id == "nvidia.fabric.kiro"
+                else args.api_key_env,
                 "harness_settings": settings,
                 "enabled_tools": [
                     "ls",
@@ -1154,6 +1156,15 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
             )
             write_report(output, report)
             continue
+        if row.get("api_key_env") and not os.environ.get(row["api_key_env"]):
+            result.update(
+                reason=f"Missing credential environment variable {row['api_key_env']}",
+                failures=[
+                    {"category": "auth", "reason": "Required credential is unavailable"}
+                ],
+            )
+            write_report(output, report)
+            continue
         install = environment["adapters"].get(row["adapter_id"], {})
         if install.get("status") != "ready":
             result.update(
@@ -1164,15 +1175,6 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                         "category": "install",
                         "reason": install.get("log", "No prepared image"),
                     }
-                ],
-            )
-            write_report(output, report)
-            continue
-        if row.get("api_key_env") and not os.environ.get(row["api_key_env"]):
-            result.update(
-                reason=f"Missing credential environment variable {row['api_key_env']}",
-                failures=[
-                    {"category": "auth", "reason": "Required credential is unavailable"}
                 ],
             )
             write_report(output, report)

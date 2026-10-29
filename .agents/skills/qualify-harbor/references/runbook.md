@@ -53,6 +53,16 @@ A filesystem checkpoint path is not an inference API. Start with an existing ope
 
 Claude needs Anthropic Messages, Codex normally uses Responses, and most other local coding harnesses use Chat Completions. `--endpoint-kind openai-and-anthropic` permits the same endpoint to be attempted through both families. Kiro requires its native provider, authentication and advertised model. Droid uses provider `factory`; its supported native BYOK profile can route to a custom endpoint without setting normalized model `base_url`.
 
+For Kiro, keep the row prerequisite-blocked (skipped execution) unless the
+native CLI, `KIRO_API_KEY`, and a Kiro-advertised model are available. Kiro does
+not support BYOM through this adapter: do not use the local Nemotron endpoint,
+a dummy `MODEL_API_KEY`, or an experimental protocol bridge. To enable a native
+trial, select `model_provider=kiro`, the advertised model ID, `base_url=null`,
+and `api_key_env=KIRO_API_KEY`, then mark the prepared row runnable. The runner
+checks credential presence before task installation or launch; only the secret
+variable name belongs in the plan. Missing credentials retain a blocked row,
+not an integration failure or a full-catalog pass.
+
 For Remote Agent HTTP integration, explicitly set its row to `action=run`, clear
 normalized `base_url`, and configure `harness_settings` with `base_url` and
 `api_type=openai-completions` for a compatible endpoint. Keep the actual served

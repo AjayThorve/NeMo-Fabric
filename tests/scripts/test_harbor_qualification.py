@@ -72,6 +72,8 @@ def test_plan_uses_complete_catalog_and_distinguishes_prerequisites(qualificatio
     assert set(rows) == set(catalog["adapters"])
     assert rows["nvidia.fabric.claude"]["action"] == "run"
     assert rows["nvidia.fabric.kiro"]["action"] == "blocked"
+    assert rows["nvidia.fabric.kiro"]["api_key_env"] == "KIRO_API_KEY"
+    assert "BYOM is unsupported" in rows["nvidia.fabric.kiro"]["reason"]
     assert rows["nvidia.fabric.remote-agent"]["reason"]
     assert rows["nvidia.fabric.pi"]["capabilities"]["mcp"] == "untested"
 
@@ -540,6 +542,61 @@ def test_failed_host_environment_preserves_complete_report(
             assert row["outcome"] == planned["action"]
             assert row["reason"] == planned["reason"]
     assert report["full_catalog_passed"] is False
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
+@pytest.mark.parametrize("key_present", [False, True])
+def test_kiro_missing_native_key_skips_before_task_install_or_launch(
+    tmp_path, qualification_plan, monkeypatch, key_present
+):
+    row = next(
+        r
+        for r in qualification_plan["adapters"]
+        if r["adapter_id"] == "nvidia.fabric.kiro"
+    )
+    row.update(action="run", reason="", model="kiro/advertised-model", base_url=None)
+    monkeypatch.setenv("MODEL_API_KEY", "dummy-local-model-key")
+    if key_present:
+        monkeypatch.setenv("KIRO_API_KEY", "native-test-key")
+    else:
+        monkeypatch.delenv("KIRO_API_KEY", raising=False)
+    identity = {
+        "editable": [],
+        "packages": {
+            "nemo-fabric-runtime": qualification_plan["version"],
+            "harbor": qualification_plan["harbor_version"],
+        },
+        "catalog_sha256": qualify.fingerprint(qualify.plan_catalog(qualification_plan)),
+        "wheel_sha256": {"nemo-fabric-runtime": "test-wheel-hash"},
+    }
+    environment = {
+        "plan": qualification_plan,
+        "python": sys.executable,
+        "wheel_sha256": {"nemo_fabric_runtime-test.whl": "test-wheel-hash"},
+        "adapters": {},
+    }
+    monkeypatch.setattr(qualify, "execute", lambda *args, **kwargs: 0)
+    real_check_output = qualify.subprocess.check_output
+
+    def check_output(command, *args, **kwargs):
+        if str(command[-1]).endswith("identity.py"):
+            return json.dumps(identity)
+        return real_check_output(command, *args, **kwargs)
+
+    monkeypatch.setattr(qualify.subprocess, "check_output", check_output)
+    output = tmp_path / "report"
+    assert (
+        qualify.run(qualification_plan, environment, output, [row["adapter_id"]]) == 1
+    )
+    report = qualify.load(output / "report.json")
+    kiro = next(r for r in report["adapters"] if r["adapter_id"] == row["adapter_id"])
+    assert kiro["outcome"] == ("failed" if key_present else "blocked")
+    assert kiro["failures"][0]["category"] == ("install" if key_present else "auth")
+    if not key_present:
+        assert kiro["reason"] == "Missing credential environment variable KIRO_API_KEY"
+    assert len(report["adapters"]) == len(qualification_plan["adapters"])
+    assert report["full_catalog_passed"] is False
+    assert not (output / str(qualification_plan["adapters"].index(row))).exists()
 
 
 @pytest.mark.usefixtures("clean_qualification_checkout")

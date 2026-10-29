@@ -8,6 +8,8 @@ license: Apache-2.0
 
 Use the runnable gate in this directory to test Harbor → NeMo Fabric → harness → inference → result → verifier. Harbor owns containers, task lifecycle, and scoring. The gate runs exactly one shared Terminal-Bench task across the catalog, builds isolated package installs on that task environment, and retains a complete adapter denominator. It does not install or manage inference servers.
 
+Kiro uses its native authenticated provider and requires `KIRO_API_KEY`. Skip Kiro execution when that key is absent, retaining its prerequisite-blocked row in the catalog denominator. Kiro BYOM and arbitrary local model endpoints are unsupported; do not substitute `MODEL_API_KEY` or an experimental protocol bridge. With credentials available, select a Kiro-advertised model and prepare the native CLI before marking its row runnable.
+
 Read [the runbook](references/runbook.md) for commands, environment requirements, and failure triage.
 
 1. Identify the exact package version or source commit and compatible Harbor package version. Use a disposable checkout of that version with a fresh catalog (`just check-adapter-catalog`). Do not use a developer's ambient editable environment as reproducible installation evidence.
