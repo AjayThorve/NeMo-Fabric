@@ -163,7 +163,11 @@ def _free_port() -> int:
 
 def _operations(root: Path) -> list[dict]:
     path = root / "operations.jsonl"
-    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    return (
+        [json.loads(line) for line in path.read_text().splitlines()]
+        if path.exists()
+        else []
+    )
 
 
 def _run(launcher, workload, env):
@@ -216,10 +220,14 @@ run_workload_consumer() { local mode="$1"; shift; uv run --no-sync consumer "$mo
     completed = _run(launcher, hook, {"OPENSHELL_EXAMPLE_MODE": "both"})
 
     assert completed.returncode == 0, completed.stderr
-    calls = [operation for operation in _operations(root) if operation["command"] == "uv"]
+    calls = [
+        operation for operation in _operations(root) if operation["command"] == "uv"
+    ]
     assert [call["args"][3] for call in calls] == ["caller_owned", "fabric_owned"]
     assert all(call["args"][-2:] == ["--input", "words with spaces"] for call in calls)
-    assert all(call["provider"].endswith("/fabric-environment-openshell") for call in calls)
+    assert all(
+        call["provider"].endswith("/fabric-environment-openshell") for call in calls
+    )
     assert not (root / "sandbox-state.json").exists()
     create = next(
         operation["args"]
@@ -253,7 +261,9 @@ def test_sdk_example_hook_passes_normal_sdk_lifecycle_options(launcher, mode):
     )
 
     assert completed.returncode == 0, completed.stderr
-    call = next(operation for operation in _operations(root) if operation["command"] == "uv")
+    call = next(
+        operation for operation in _operations(root) if operation["command"] == "uv"
+    )
     assert call["args"][:5] == [
         "run",
         "--no-sync",
@@ -280,7 +290,10 @@ def test_consumer_failure_cleans_up_caller_owned_sandbox(launcher):
 
     assert completed.returncode == 9
     assert not (root / "sandbox-state.json").exists()
-    assert any(operation["command"] == "openshell" and "delete" in operation["args"] for operation in _operations(root))
+    assert any(
+        operation["command"] == "openshell" and "delete" in operation["args"]
+        for operation in _operations(root)
+    )
 
 
 def test_occupied_gateway_port_stops_before_building(launcher):
@@ -292,10 +305,15 @@ def test_occupied_gateway_port_stops_before_building(launcher):
 
     assert completed.returncode == 2
     assert "already in use; set OPENSHELL_EXAMPLE_PORT" in completed.stderr
-    assert not any(operation["command"] in {"cargo", "docker", "openshell", "uv"} for operation in _operations(root))
+    assert not any(
+        operation["command"] in {"cargo", "docker", "openshell", "uv"}
+        for operation in _operations(root)
+    )
 
 
-@pytest.mark.parametrize("current_id,deleted", [("owned-id", True), ("replacement-id", False)])
+@pytest.mark.parametrize(
+    "current_id,deleted", [("owned-id", True), ("replacement-id", False)]
+)
 def test_fabric_owned_failure_cleanup_requires_the_recorded_sandbox_id(
     launcher, current_id, deleted
 ):
@@ -340,7 +358,7 @@ def test_code_review_workload_configures_hosted_provider_before_sandbox(launcher
     _, root, _ = launcher
     completed = _run(
         launcher,
-        ROOT / "examples/code_review_agent/demo-openshell-openclaw-sdk.sh",
+        ROOT / "examples/code_review_agent/demo-openshell-hermes-sdk.sh",
         {
             "OPENSHELL_EXAMPLE_MODE": "caller_owned",
             "NVIDIA_API_KEY": "test-key-must-not-appear-in-command-arguments",
@@ -359,8 +377,14 @@ def test_code_review_workload_configures_hosted_provider_before_sandbox(launcher
     ]
     profile, provider = provider_calls
     profile_args = profile["args"]
-    assert profile_args[profile_args.index("provider") + 1 :][:2] == ["profile", "import"]
-    assert Path(profile_args[profile_args.index("--file") + 1]).name == "openshell-provider.yaml"
+    assert profile_args[profile_args.index("provider") + 1 :][:2] == [
+        "profile",
+        "import",
+    ]
+    assert (
+        Path(profile_args[profile_args.index("--file") + 1]).name
+        == "openshell-provider.yaml"
+    )
     provider_args = provider["args"]
     assert provider_args[provider_args.index("provider") + 1] == "create"
     assert provider_args[provider_args.index("--name") + 1] == "hosted"
@@ -401,7 +425,7 @@ def test_hermes_code_review_workload_selects_harness_and_optional_relay(
     operations = _operations(root)
     call = next(operation for operation in operations if operation["command"] == "uv")
     assert "examples.code_review_agent.openshell_sdk_consumer" in call["args"]
-    assert call["args"][call["args"].index("--harness") + 1] == "hermes"
+    assert "--harness" not in call["args"]
     assert ("--relay" in call["args"]) is relay_enabled
     assert call["args"][call["args"].index("--base-url") + 1] == (
         "https://inference.example.test/v1"
@@ -420,7 +444,8 @@ def test_hermes_code_review_workload_selects_harness_and_optional_relay(
     provider_call = next(
         operation
         for operation in operations
-        if operation["command"] == "openshell" and "create" in operation["args"]
+        if operation["command"] == "openshell"
+        and "create" in operation["args"]
         and "provider" in operation["args"]
     )
     assert provider_call["model_key_matches_expected"]
@@ -447,7 +472,8 @@ def test_hermes_default_profile_uses_nvidia_key_when_both_keys_exist(launcher):
     provider_call = next(
         operation
         for operation in _operations(root)
-        if operation["command"] == "openshell" and "create" in operation["args"]
+        if operation["command"] == "openshell"
+        and "create" in operation["args"]
         and "provider" in operation["args"]
     )
     assert provider_call["model_key_matches_expected"]
@@ -544,7 +570,8 @@ def test_langgraph_default_profile_uses_nvidia_key_when_both_keys_exist(launcher
     provider_call = next(
         operation
         for operation in _operations(root)
-        if operation["command"] == "openshell" and "create" in operation["args"]
+        if operation["command"] == "openshell"
+        and "create" in operation["args"]
         and "provider" in operation["args"]
     )
     assert provider_call["model_key_matches_expected"]
@@ -567,7 +594,8 @@ def test_langgraph_default_profile_falls_back_to_openai_key(launcher):
     provider_call = next(
         operation
         for operation in _operations(root)
-        if operation["command"] == "openshell" and "create" in operation["args"]
+        if operation["command"] == "openshell"
+        and "create" in operation["args"]
         and "provider" in operation["args"]
     )
     assert provider_call["model_key_matches_expected"]
@@ -575,8 +603,10 @@ def test_langgraph_default_profile_falls_back_to_openai_key(launcher):
 
 @pytest.mark.parametrize(
     "environment,message",
-    [({"MOCK_OS": "Darwin"}, "requires Linux"),
-     ({"OPENSHELL_EXAMPLE_MODE": "unknown"}, "must be caller_owned")],
+    [
+        ({"MOCK_OS": "Darwin"}, "requires Linux"),
+        ({"OPENSHELL_EXAMPLE_MODE": "unknown"}, "must be caller_owned"),
+    ],
 )
 def test_invalid_platform_or_mode_stops_before_building(launcher, environment, message):
     script, root, base_env = launcher
@@ -594,4 +624,7 @@ def test_invalid_platform_or_mode_stops_before_building(launcher, environment, m
     )
     assert completed.returncode == 2
     assert message in completed.stderr
-    assert not any(operation["command"] in {"cargo", "uv", "openshell"} for operation in _operations(root))
+    assert not any(
+        operation["command"] in {"cargo", "uv", "openshell"}
+        for operation in _operations(root)
+    )
