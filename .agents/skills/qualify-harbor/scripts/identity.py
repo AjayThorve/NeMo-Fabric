@@ -25,14 +25,23 @@ def selection(payload: dict) -> dict:
         FabricConfig.from_mapping(payload["config"]),
         base_dir=payload["config_base_dir"],
     )
-    descriptor = plan.to_mapping()["adapter_descriptor"]
-    return {
+    resolved = plan.to_mapping()
+    descriptor = resolved["adapter_descriptor"]
+    selected = {
         "adapter_id": descriptor["descriptor"]["adapter_id"],
         "python_prefix": sys.prefix,
         "provenance": descriptor["provenance"],
         "runner": descriptor["descriptor"]["runner"],
         "admission_sha256": _adapter_descriptor_sha256(plan),
     }
+    target = resolved.get("adapter_target_descriptor")
+    if target is not None:
+        selected["workflow"] = {
+            "target_id": target["descriptor"]["id"],
+            "entrypoint": target["descriptor"]["spec"]["entrypoint"],
+            "provenance": target["provenance"],
+        }
+    return selected
 
 
 def identity() -> dict:

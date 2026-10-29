@@ -31,7 +31,7 @@ PY
 
 Use `--mode registry --version "$PACKAGE_VERSION" --catalog-json "$WORK/catalog/catalog.json"` with the other plan arguments below. Use a fresh catalog directory per package version.
 
-The denominator is every descriptor in the checked-in metadata catalog, including both NOOA variants and remote-agent. Generic NOOA requires registered workflow selection, which the standalone Harbor bridge does not transport; its catalog target IDs remain listed as unsupported coverage. The separate BenchAgent entry exercises standalone NOOA. Future catalog entries appear automatically and need a reviewed installation recipe/provider profile. They are not silently removed when no harness or credential is available. The builder derives Python extras and TypeScript optional peers from package manifests; a few harnesses deliberately installed outside adapter dependencies have explicit tested recipes in `prepare.py`. Review those recipes when the supported harness pins change.
+The denominator is every descriptor in the checked-in metadata catalog, including both NOOA variants and remote-agent. Workflow-only adapters remain unsupported until an explicit registered target is selected with the SDK bridge; their catalog target IDs remain listed in the report. The separate BenchAgent entry exercises standalone NOOA. Future catalog entries appear automatically and need a reviewed installation recipe/provider profile. They are not silently removed when no harness or credential is available. The builder derives Python extras and TypeScript optional peers from package manifests; a few harnesses deliberately installed outside adapter dependencies have explicit tested recipes in `prepare.py`. Review those recipes when the supported harness pins change.
 
 The OpenHands recipe uses the adapter's documented compatible stack:
 `openhands-sdk==1.50.0`, `openhands-tools==1.50.0`, `litellm==1.100.1`, and
@@ -162,6 +162,34 @@ on the same row. This disables monetary budgeting and keeps cost unavailable;
 it does not report a zero cost. `max_turns` projects to `fabric_max_turns`.
 The bridge and runner must both contain the model-settings transport from #522.
 
+For a registered workflow, generate the plan with `--bridge sdk` and configure
+that adapter's row with `workflow_target_id` and optional `workflow_settings`.
+For example, the generic NOOA adapter can select its registered coding target:
+
+```json
+{
+  "workflow_target_id": "nvidia.nooa.coding-agent",
+  "workflow_settings": {},
+  "action": "run",
+  "reason": ""
+}
+```
+
+Keep the row's existing adapter ID, catalog record, model, credentials reference,
+and all other catalog rows. Do not substitute the separate BenchAgent adapter.
+The target must exist in the exact catalog snapshot, bind to the selected adapter,
+and have an unchanged descriptor. Settings must be JSON without inline
+credentials; the SDK validates them against the target's schema before setup.
+This requires matching host/task SDKs with registered-workflow Harbor support.
+Native Harbor workflow transport is not qualified by this path.
+
+The command and installed-image preflight transport the same target/settings.
+Task evidence retains the target's factory and installed descriptor provenance;
+the admission fingerprint covers both normalized adapter and target descriptors.
+A factory, settings schema, selection or origin mismatch fails integration.
+Workflow selection does not claim complete usage, MCP, skills or subagent
+coverage. Unknown accounting remains unknown and is checked for exact transport.
+
 A developer subset retains every other row as excluded and sets `scope=developer_subset`:
 
 ```bash
@@ -188,7 +216,7 @@ integration outcome. A subset cannot establish full-catalog coverage.
 
 ## Evidence And Triage
 
-`report.json` is the sanitized machine summary; `summary.md` is the human matrix. Both are rewritten atomically after each row, with pending rows retained if interrupted. `plan.json` retains the full descriptor snapshot. Each attempted row includes a reproducible command, timestamps, image identity, host/task package and harness versions, runtime wheel hash, observed runtime/invocation/adapter identity, reward, usage, capability limitations, and cleanup status. Catalog hashes cover raw metadata; Harbor admission hashes cover the core-normalized descriptor. The gate records both and compares the uploaded admission hash against SDK metadata inspection, never directly against the raw catalog hash. Raw task artifacts stay in the private run directory. The gate redacts known credential values from text output, but binary artifacts and unknown secrets are not shareable by assumption; inspect before exporting them.
+`report.json` is the sanitized machine summary; `summary.md` is the human matrix. Both are rewritten atomically after each row, with pending rows retained if interrupted. `plan.json` retains the full descriptor snapshot. Each attempted row includes a reproducible command, timestamps, image identity, host/task package and harness versions, runtime wheel hash, observed runtime/invocation/adapter identity, selected workflow target/settings when present, reward, usage, capability limitations, and cleanup status. Catalog hashes cover raw metadata; Harbor admission hashes cover the core-normalized adapter descriptor and selected target descriptor. The gate records both and compares the uploaded admission hash against SDK metadata inspection, never directly against the raw catalog hash. Raw task artifacts stay in the private run directory. The gate redacts known credential values from text output, but binary artifacts and unknown secrets are not shareable by assumption; inspect before exporting them.
 
 Source-built task images remove the build tree after packaging. The native core can discover its compile-time source directory when that directory still exists; identical descriptor bytes do not guarantee the intended execution origin. A metadata-only task-container preflight verifies installed Python package data or the explicitly selected npm package before any model call. The verifier records the actual task's descriptor provenance again. A bundled/source-tree origin or drift between those observations fails admission even when versions and fingerprints match.
 

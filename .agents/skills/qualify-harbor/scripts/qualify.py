@@ -402,6 +402,8 @@ def validate_plan(plan: dict) -> None:
         def validate_settings(value: object) -> None:
             if isinstance(value, dict):
                 for name, child in value.items():
+                    if not isinstance(name, str):
+                        raise ValueError("settings JSON objects require string keys")
                     if re.search(
                         r"(?:api.?key|auth.?token|password|secret)$", name, re.I
                     ):
@@ -414,6 +416,55 @@ def validate_plan(plan: dict) -> None:
                     validate_settings(child)
 
         validate_settings(row["harness_settings"])
+        target_id = row.get("workflow_target_id")
+        workflow_settings = row.get("workflow_settings")
+        if target_id is None:
+            if workflow_settings is not None:
+                raise ValueError("workflow_settings requires workflow_target_id")
+            if row["action"] == "run" and record["descriptor"].get("target_types") == [
+                "workflow"
+            ]:
+                raise ValueError("workflow-only adapters require workflow_target_id")
+        else:
+            if (
+                plan["bridge"] != "sdk"
+                or not isinstance(target_id, str)
+                or not target_id
+                or target_id != target_id.strip()
+            ):
+                raise ValueError(
+                    "workflow_target_id requires a non-empty ID and the SDK bridge"
+                )
+            target = catalog["targets"].get(target_id)
+            target_source = reference["targets"].get(target_id)
+            if (
+                target is None
+                or target_source is None
+                or any(
+                    target[key] != target_source[key]
+                    for key in ("source", "ecosystem", "descriptor")
+                )
+                or target["package"]["name"] != target_source["package"]["name"]
+                or fingerprint(load(ROOT / target["source"])) != target["sha256"]
+                or target["descriptor"]["type"] != "workflow"
+                or target["descriptor"]["adapter_id"] != row["adapter_id"]
+                or "workflow" not in record["descriptor"].get("target_types", [])
+            ):
+                raise ValueError(
+                    "workflow target metadata must match its catalog and adapter"
+                )
+            if workflow_settings is not None:
+                if not isinstance(workflow_settings, dict) or any(
+                    not isinstance(key, str) for key in workflow_settings
+                ):
+                    raise ValueError("workflow_settings must be a JSON object")
+                try:
+                    json.dumps(workflow_settings, allow_nan=False)
+                except (TypeError, ValueError, OverflowError, RecursionError):
+                    raise ValueError(
+                        "workflow_settings must contain JSON values"
+                    ) from None
+                validate_settings(workflow_settings)
         model_settings = row.get("model_settings")
         if model_settings is not None:
             if plan["bridge"] != "sdk" or not isinstance(model_settings, dict):
@@ -470,14 +521,14 @@ def make_plan(args: argparse.Namespace) -> dict:
     }
     for adapter_id, record in sorted(catalog["adapters"].items()):
         reason = prerequisites.get(adapter_id, "")
-        unsupported = adapter_id == "nvidia.fabric.nooa"
+        unsupported = record["descriptor"].get("target_types") == ["workflow"]
         targets = [
             target_id
             for target_id, target in catalog["targets"].items()
             if target["descriptor"]["adapter_id"] == adapter_id
         ]
         if unsupported:
-            reason = "Generic NOOA requires a registered workflow target; Harbor's standalone Fabric agent does not transport workflow selection. Use the separately reported BenchAgent variant for a standalone task."
+            reason = "This adapter requires a registered workflow target. Select workflow_target_id and optional workflow_settings with the SDK bridge before marking the row runnable."
         if (
             adapter_id == "nvidia.fabric.claude"
             and args.endpoint_kind == "chat-completions"
@@ -616,6 +667,9 @@ def harbor_command(
         options["fabric_model_provider"] = row["model_provider"]
     if row.get("model_settings") is not None:
         options["fabric_model_settings"] = row["model_settings"]
+    if row.get("workflow_target_id") is not None:
+        options["fabric_workflow_target_id"] = row["workflow_target_id"]
+        options["fabric_workflow_settings"] = row.get("workflow_settings") or {}
     if row.get("max_turns") is not None:
         options["fabric_max_turns"] = row["max_turns"]
     if row.get("base_url"):
@@ -693,17 +747,44 @@ def normalized_accounting(path: Path) -> dict:
     }
 
 
-def admission_fingerprint(spec: dict, descriptor: dict) -> str | None:
+def admission_fingerprint(
+    spec: dict, descriptor: dict, target_descriptor: dict | None = None
+) -> str | None:
     from nemo_fabric import FabricConfig, inspect_adapter
 
+    options = (
+        {"target_descriptor": target_descriptor}
+        if target_descriptor is not None
+        else {}
+    )
     return inspect_adapter(
-        FabricConfig.from_mapping(spec["config"]), descriptor
+        FabricConfig.from_mapping(spec["config"]), descriptor, **options
     ).descriptor_sha256
 
 
-def valid_selection(selected: dict, row: dict) -> bool:
+def valid_selection(selected: dict, row: dict, target: dict | None = None) -> bool:
     origins = selected.get("provenance") or []
     if selected.get("adapter_id") != row["adapter_id"] or not origins:
+        return False
+    workflow = selected.get("workflow")
+    if row.get("workflow_target_id") is None:
+        if workflow is not None:
+            return False
+    elif (
+        target is None
+        or not isinstance(workflow, dict)
+        or workflow.get("target_id") != row["workflow_target_id"]
+        or workflow.get("entrypoint") != target["descriptor"]["spec"]["entrypoint"]
+        or not workflow.get("provenance")
+        or not all(
+            origin.get("source") == "installed_package"
+            and origin.get("path", "").startswith(
+                selected.get("python_prefix", "") + "/share/nemo-fabric/adapters/"
+            )
+            and Path(origin["path"]).name == Path(target["source"]).name
+            for origin in workflow["provenance"]
+        )
+    ):
         return False
     filename = Path(row["catalog"]["source"]).name
     if row["catalog"]["ecosystem"] == "typescript":
@@ -740,6 +821,9 @@ def selection_payload(plan: dict, row: dict) -> dict:
     )
     if row.get("model_settings") is not None:
         provider_options["model_settings"] = row["model_settings"]
+    if row.get("workflow_target_id") is not None:
+        provider_options["workflow_target_id"] = row["workflow_target_id"]
+        provider_options["workflow_settings"] = row.get("workflow_settings") or {}
     config = build_harbor_config(
         adapter_id=row["adapter_id"],
         workspace="/app",
@@ -758,7 +842,11 @@ def selection_payload(plan: dict, row: dict) -> dict:
 
 
 def inspect_results(
-    job: Path, row: dict, expected_identity: dict, expected_selection: dict
+    job: Path,
+    row: dict,
+    expected_identity: dict,
+    expected_selection: dict,
+    target: dict | None = None,
 ) -> dict:
     """Keep transport, reward, selection, usage and telemetry as separate evidence."""
     summary = {"checks": {}, "failures": [], "limitations": [], "evidence": []}
@@ -794,7 +882,7 @@ def inspect_results(
         observed_selection = load(one(job, "*/verifier/qualification-selection.json"))
         summary["task_selection"] = observed_selection
         summary["checks"]["task_descriptor_provenance"] = (
-            valid_selection(observed_selection, row)
+            valid_selection(observed_selection, row, target)
             and observed_selection == expected_selection
         )
         if not summary["checks"]["task_descriptor_provenance"]:
@@ -850,11 +938,30 @@ def inspect_results(
                 json.dumps(result.get("error")),
             )
         spec = load(one(job, "*/agent/fabric-run-*.json"))
-        expected_admission = admission_fingerprint(spec, row["catalog"]["descriptor"])
+        target_id = row.get("workflow_target_id")
+        workflow = spec["config"].get("workflow")
+        summary["checks"]["workflow_selection"] = (
+            workflow is None
+            if target_id is None
+            else isinstance(workflow, dict)
+            and workflow.get("target_id") == target_id
+            and (workflow.get("settings") or {}) == (row.get("workflow_settings") or {})
+        )
+        if not summary["checks"]["workflow_selection"]:
+            fail(
+                "adapter_admission",
+                "Uploaded workflow differs from the selected target/settings",
+            )
+        expected_admission = admission_fingerprint(
+            spec,
+            row["catalog"]["descriptor"],
+            target["descriptor"] if target is not None else None,
+        )
         summary["admission_sha256"] = {
             "expected_normalized": expected_admission,
             "uploaded": spec.get("adapter_descriptor_sha256"),
             "catalog_raw": row["catalog"]["sha256"],
+            **({"target_catalog_raw": target["sha256"]} if target is not None else {}),
         }
         summary["checks"]["descriptor_fingerprint"] = (
             expected_admission is not None
@@ -1084,6 +1191,8 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                     "api_key_env": row.get("api_key_env"),
                     "harness_settings": row["harness_settings"],
                     "model_settings": row.get("model_settings"),
+                    "workflow_target_id": row.get("workflow_target_id"),
+                    "workflow_settings": row.get("workflow_settings"),
                     "max_turns": row.get("max_turns"),
                     "task_python": row.get("task_python"),
                     "telemetry": row["telemetry"],
@@ -1278,7 +1387,8 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                 )
             selected_adapter = json.loads(probe.stdout)
             result["preflight_selection"] = selected_adapter
-            if not valid_selection(selected_adapter, row):
+            target = plan_catalog(plan)["targets"].get(row.get("workflow_target_id"))
+            if not valid_selection(selected_adapter, row, target):
                 raise ValueError(
                     "adapter admission: source or unexpected descriptor origin selected"
                 )
@@ -1290,7 +1400,7 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                 cwd=directory,
             )
             evidence = inspect_results(
-                jobs / name, row, task_identity, selected_adapter
+                jobs / name, row, task_identity, selected_adapter, target
             )
             evidence["checks"] = {**result["checks"], **evidence["checks"]}
             result.update(evidence)

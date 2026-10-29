@@ -78,6 +78,233 @@ def test_plan_uses_complete_catalog_and_distinguishes_prerequisites(qualificatio
     assert rows["nvidia.fabric.pi"]["capabilities"]["mcp"] == "untested"
 
 
+@pytest.fixture(name="workflow_row")
+def workflow_row_fixture(qualification_plan):
+    qualification_plan["bridge"] = "sdk"
+    row = next(
+        r
+        for r in qualification_plan["adapters"]
+        if r["adapter_id"] == "nvidia.fabric.nooa"
+    )
+    row.update(
+        workflow_target_id="nvidia.nooa.coding-agent",
+        workflow_settings={},
+        action="run",
+        reason="",
+    )
+    return row
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
+def test_workflow_selection_keeps_the_full_catalog(qualification_plan, workflow_row):
+    qualify.validate_plan(qualification_plan)
+    assert len(qualification_plan["adapters"]) == 18
+    assert workflow_row["action"] == "run"
+    assert "nvidia.nooa.coding-agent" in workflow_row["registered_targets"]
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "native",
+        "empty",
+        "spaces",
+        "type",
+        "missing",
+        "wrong_adapter",
+        "settings_without_target",
+        "settings_type",
+        "settings_secret",
+        "nonfinite",
+        "target_drift",
+    ],
+)
+def test_workflow_selection_rejects_unattributable_routes(
+    qualification_plan, workflow_row, mutation
+):
+    if mutation == "native":
+        qualification_plan["bridge"] = "native"
+    elif mutation == "empty":
+        workflow_row["workflow_target_id"] = ""
+    elif mutation == "spaces":
+        workflow_row["workflow_target_id"] = " nvidia.nooa.coding-agent"
+    elif mutation == "type":
+        workflow_row["workflow_target_id"] = 1
+    elif mutation == "missing":
+        workflow_row["workflow_target_id"] = "not.registered"
+    elif mutation == "wrong_adapter":
+        other = next(
+            r
+            for r in qualification_plan["adapters"]
+            if r["adapter_id"] == "nvidia.fabric.nooa.bench-agent"
+        )
+        other.update(
+            workflow_target_id=workflow_row.pop("workflow_target_id"),
+            workflow_settings=workflow_row.pop("workflow_settings"),
+        )
+        workflow_row.update(action="unsupported", reason="Not selected")
+    elif mutation == "settings_without_target":
+        workflow_row.pop("workflow_target_id")
+    elif mutation == "settings_type":
+        workflow_row["workflow_settings"] = []
+    elif mutation == "settings_secret":
+        workflow_row["workflow_settings"] = {"nested": {"api_key": "secret"}}
+    elif mutation == "nonfinite":
+        workflow_row["workflow_settings"] = {"value": float("nan")}
+    else:
+        qualification_plan["mode"] = "registry"
+        qualification_plan["catalog_snapshot"]["targets"][
+            workflow_row["workflow_target_id"]
+        ]["descriptor"]["spec"]["entrypoint"]["ref"] = "changed:factory"
+    with pytest.raises(ValueError):
+        qualify.validate_plan(qualification_plan)
+
+
+@pytest.mark.usefixtures("requires_harbor", "clean_qualification_checkout")
+def test_workflow_command_payload_and_report_agree(
+    qualification_plan, workflow_row, tmp_path
+):
+    command = qualify.harbor_command(
+        qualification_plan, workflow_row, "python", tmp_path, tmp_path, "trial"
+    )
+    assert "fabric_workflow_target_id=nvidia.nooa.coding-agent" in command
+    assert "fabric_workflow_settings={}" in command
+    payload = qualify.selection_payload(qualification_plan, workflow_row)
+    assert payload["config"]["workflow"] == {
+        "target_id": workflow_row["workflow_target_id"]
+    }
+    target = qualification_plan["catalog_snapshot"]["targets"][
+        workflow_row["workflow_target_id"]
+    ]
+    combined = qualify.admission_fingerprint(
+        payload, workflow_row["catalog"]["descriptor"], target["descriptor"]
+    )
+    assert isinstance(combined, str) and len(combined) == 64
+    changed = copy.deepcopy(target["descriptor"])
+    changed["spec"]["entrypoint"]["ref"] = "different:factory"
+    assert (
+        qualify.admission_fingerprint(
+            payload, workflow_row["catalog"]["descriptor"], changed
+        )
+        != combined
+    )
+    assert (
+        qualify.run(
+            qualification_plan,
+            {"plan": qualification_plan},
+            tmp_path / "report",
+            [workflow_row["adapter_id"]],
+        )
+        == 1
+    )
+    report = qualify.load(tmp_path / "report/report.json")
+    selected = next(
+        r["selected"]
+        for r in report["adapters"]
+        if r["adapter_id"] == workflow_row["adapter_id"]
+    )
+    assert selected["workflow_target_id"] == workflow_row["workflow_target_id"]
+    assert selected["workflow_settings"] == {}
+    assert len(report["adapters"]) == 18
+
+
+@pytest.mark.parametrize(
+    "mutation", [None, "missing", "factory", "source", "target_id"]
+)
+def test_workflow_provenance_requires_installed_matching_target(
+    qualification_plan, workflow_row, mutation
+):
+    target = qualification_plan["catalog_snapshot"]["targets"][
+        workflow_row["workflow_target_id"]
+    ]
+    selected = {
+        "adapter_id": workflow_row["adapter_id"],
+        "python_prefix": "/usr/local",
+        "provenance": [
+            {
+                "source": "installed_package",
+                "path": "/usr/local/share/nemo-fabric/adapters/nooa/nooa.fabric-adapter.json",
+            }
+        ],
+        "workflow": {
+            "target_id": workflow_row["workflow_target_id"],
+            "entrypoint": copy.deepcopy(target["descriptor"]["spec"]["entrypoint"]),
+            "provenance": [
+                {
+                    "source": "installed_package",
+                    "path": "/usr/local/share/nemo-fabric/adapters/nooa/targets/coding-agent.fabric-target.json",
+                }
+            ],
+        },
+    }
+    if mutation == "missing":
+        selected.pop("workflow")
+    elif mutation == "factory":
+        selected["workflow"]["entrypoint"]["ref"] = "other:factory"
+    elif mutation == "source":
+        selected["workflow"]["provenance"][0]["source"] = "bundled"
+    elif mutation == "target_id":
+        selected["workflow"]["target_id"] = "other.target"
+    assert qualify.valid_selection(selected, workflow_row, target) is (mutation is None)
+
+
+@pytest.mark.usefixtures("requires_harbor")
+def test_workflow_settings_are_transported_and_admitted_by_target_schema(
+    qualification_plan, workflow_row, tmp_path
+):
+    from nemo_fabric import FabricConfigError
+
+    workflow_row.update(
+        workflow_target_id="nvidia.nooa.arc-solver",
+        workflow_settings={"reflect_every": 3},
+    )
+    command = qualify.harbor_command(
+        qualification_plan, workflow_row, "python", tmp_path, tmp_path, "trial"
+    )
+    assert 'fabric_workflow_settings={"reflect_every": 3}' in command
+    payload = qualify.selection_payload(qualification_plan, workflow_row)
+    assert payload["config"]["workflow"]["settings"] == {"reflect_every": 3}
+    target = qualification_plan["catalog_snapshot"]["targets"][
+        workflow_row["workflow_target_id"]
+    ]
+    assert qualify.admission_fingerprint(
+        payload, workflow_row["catalog"]["descriptor"], target["descriptor"]
+    )
+    payload["config"]["workflow"]["settings"] = {"reflect_every": 0}
+    with pytest.raises(FabricConfigError):
+        qualify.admission_fingerprint(
+            payload, workflow_row["catalog"]["descriptor"], target["descriptor"]
+        )
+
+
+@pytest.mark.usefixtures("requires_harbor")
+def test_workflow_identity_retains_target_without_importing_factory(
+    qualification_plan, workflow_row, monkeypatch
+):
+    from identity import selection
+
+    target = qualification_plan["catalog_snapshot"]["targets"][
+        workflow_row["workflow_target_id"]
+    ]
+    payload = qualify.selection_payload(qualification_plan, workflow_row)
+    payload["config"]["discovery"] = {
+        "local_paths": [str(qualify.ROOT / "adapters/python/nooa")]
+    }
+    monkeypatch.setitem(
+        sys.modules, "nemo_fabric_adapters.nooa.targets.coding_agent", None
+    )
+    selected = selection(payload)
+    assert selected["workflow"]["target_id"] == workflow_row["workflow_target_id"]
+    assert (
+        selected["workflow"]["entrypoint"] == target["descriptor"]["spec"]["entrypoint"]
+    )
+    assert selected["workflow"]["provenance"]
+    assert selected["admission_sha256"] == qualify.admission_fingerprint(
+        payload, workflow_row["catalog"]["descriptor"], target["descriptor"]
+    )
+
+
 @pytest.mark.usefixtures("clean_qualification_checkout")
 def test_registry_prerelease_keeps_python_and_npm_versions_distinct(qualification_plan):
     plan = copy.deepcopy(qualification_plan)
