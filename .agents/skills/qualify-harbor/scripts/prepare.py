@@ -189,6 +189,7 @@ def adapter_dockerfile(plan: dict, row: dict, base: str) -> str:
             lines.append("RUN npm install --prefix /opt/harness " + " ".join(specs))
     # These harnesses deliberately are not dependencies of their adapter packages.
     installs = {
+        "nvidia.fabric.droid": "npm install --global droid@0.233.0",
         "nvidia.fabric.openhands": (
             'pip install "openhands-sdk==1.50.0" "openhands-tools==1.50.0" '
             '"litellm==1.100.1" "mcp==1.28.1" && pip check'

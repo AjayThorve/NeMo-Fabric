@@ -488,6 +488,17 @@ def test_source_task_uses_packed_installs_and_exact_runtime(qualification_plan):
     assert "-e /src" not in dockerfile
 
 
+def test_droid_install_uses_pinned_native_cli_and_sdk(qualification_plan):
+    row = next(
+        r
+        for r in qualification_plan["adapters"]
+        if r["adapter_id"] == "nvidia.fabric.droid"
+    )
+    dockerfile = adapter_dockerfile(qualification_plan, row, "qualification-base:exact")
+    assert "npm install --global droid@0.233.0" in dockerfile
+    assert "@factory/droid-sdk@0.9.1" in dockerfile
+
+
 @pytest.mark.usefixtures("clean_qualification_checkout")
 @pytest.mark.parametrize("mode", ["source", "registry"])
 def test_openhands_install_uses_the_documented_compatible_sdk_stack(

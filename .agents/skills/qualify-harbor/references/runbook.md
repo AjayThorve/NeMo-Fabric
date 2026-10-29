@@ -51,7 +51,27 @@ A filesystem checkpoint path is not an inference API. Start with an existing ope
 - HTTPS is the default for remote endpoints. For an explicitly trusted private HTTP endpoint, name the exact host with `--trusted-http-host`; it is also forwarded to harnesses that advertise `insecure_http_model_hosts`. This transmits prompts and any credential without TLS to that host.
 - Export the selected credential variable through your usual secret source. Never put the value in the plan, command arguments, Docker build arguments, settings, URLs, or committed files. For a confirmed unauthenticated endpoint, a nonsecret `MODEL_API_KEY=unused` satisfies clients that require a key. It is not an authentication test.
 
-Claude needs Anthropic Messages, Codex normally uses Responses, and most other local coding harnesses use Chat Completions. `--endpoint-kind openai-and-anthropic` permits the same endpoint to be attempted through both families. Droid's descriptor requires Factory and Kiro's requires Kiro; neither declares arbitrary model endpoints. Remote-agent requires a remote **agent** with access to the task workspace, not just an inference server. A single local checkpoint cannot override these adapter contracts.
+Claude needs Anthropic Messages, Codex normally uses Responses, and most other local coding harnesses use Chat Completions. `--endpoint-kind openai-and-anthropic` permits the same endpoint to be attempted through both families. Kiro requires its native provider, authentication and advertised model. Droid uses provider `factory`; its supported native BYOK profile can route to a custom endpoint without setting normalized model `base_url`.
+
+For Remote Agent HTTP integration, explicitly set its row to `action=run`, clear
+normalized `base_url`, and configure `harness_settings` with `base_url` and
+`api_type=openai-completions` for a compatible endpoint. Keep the actual served
+model ID. This exercises the declared HTTP adapter contract; autonomous remote
+workspace/tool execution remains untested. Task reward zero does not negate a
+successful round trip.
+
+For Droid BYOK, the prepared image includes CLI `droid@0.233.0` and the adapter's
+pinned SDK. Extend its isolated task image with native
+`/root/.factory/settings.json`, following the [Droid BYOK guide](../../../../docs/integrations/harness/droid.mdx#optional-use-a-custom-byok-model).
+Set `cloudSessionSync=false` and define the real served model in `customModels`
+using provider `generic-chat-completion-api`, the endpoint `baseUrl`, and an
+`apiKey` environment reference. Select `custom:<served-model-id>` in the plan,
+`model_provider=factory`, `base_url=null`, and `api_key_env=FACTORY_API_KEY`.
+For an explicitly unauthenticated local endpoint only, the reference can also
+be `${FACTORY_API_KEY}` with dummy value `EMPTY`; this is not authentication
+coverage. Keep that profile confined to the disposable task image, record its
+Dockerfile/settings and final image identity, then mark the row runnable. Do
+not mount ambient Factory configuration or credentials.
 
 Hermes requires a supported preprovisioned task image. The source revision maintained in `just install-hermes-agent` needs Python 3.14 and explicitly rejects wheel/sdist builds. The development recipe uses editable installs and does not verify noneditable installation. Do not set an unrelated build-system escape hatch to bypass that guard. Until a suitable supported image is available, retain the entry as blocked; an attempted unsupported installation is a recorded install failure, not a pass. A custom source image can include `/opt/qualification-harness-sources.json` mapping harness names to exact revisions, which the identity collector retains.
 

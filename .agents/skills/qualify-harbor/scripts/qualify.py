@@ -441,9 +441,9 @@ def make_plan(args: argparse.Namespace) -> dict:
     rows = []
     prerequisites = {
         "nvidia.fabric.hermes": "Requires a supported preprovisioned Hermes image. The maintained Python 3.14 source revision explicitly forbids wheel/sdist builds; do not bypass its distribution guard or use an ambient editable install.",
-        "nvidia.fabric.remote-agent": "Requires a remote agent service with access to this task workspace; a model endpoint alone cannot edit it.",
+        "nvidia.fabric.remote-agent": "Requires an explicitly configured compatible HTTP endpoint/profile; workspace/tool execution is separate coverage.",
         "nvidia.fabric.kiro": "Requires Kiro CLI and KIRO_API_KEY with a Kiro-advertised provider/model; arbitrary inference endpoints are unsupported.",
-        "nvidia.fabric.droid": "Requires a Factory provider/model and Factory credential; arbitrary inference endpoints are not declared by this adapter.",
+        "nvidia.fabric.droid": "Requires Factory authentication or a prepared native Droid BYOK profile/image; custom endpoints use native settings, not model base_url.",
     }
     for adapter_id, record in sorted(catalog["adapters"].items()):
         reason = prerequisites.get(adapter_id, "")
