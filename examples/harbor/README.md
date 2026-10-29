@@ -13,6 +13,8 @@ you want to exercise.
 
 ## Walkthroughs
 
+For reproducible repository integration checks, use the [`qualify-harbor` maintainer skill](../../.agents/skills/qualify-harbor/SKILL.md). It runs one shared Terminal-Bench task across a catalog-derived harness matrix with isolated host/task installs and reports blocked and failed coverage alongside deterministic verifier results. The individual walkthroughs below do not establish an all-harness integration pass.
+
 | Walkthrough | What it demonstrates |
 | --- | --- |
 | [Calculator walkthrough](calculator/README.md) | Validate the complete integration and Harbor reward with a deterministic, credential-free smoke test, then run the same task with OpenClaw, Claude, Pi, or Codex. |
@@ -109,6 +111,7 @@ container boundary:
 | `--skill` | `skills.paths` |
 | `--mcp-config` | `mcp.servers` |
 | `--ak fabric_telemetry=relay` | `telemetry.providers.relay` and `relay.observability` |
+| `--ak fabric_model_provider=<provider>` | `models.default.provider` (overrides model-prefix inference) |
 | `--ak fabric_model_base_url=<url>` | `models.default.base_url` |
 | `--ak fabric_model_api_key_env=<name>` | `models.default.api_key_env` |
 | `--ak fabric_discovery_paths='["/task/adapter.fabric-adapter.json"]'` | `discovery.local_paths` for task-local descriptors such as Pi |
