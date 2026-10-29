@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from urllib.parse import unquote, urlsplit
 
 
 def selection(payload: dict) -> dict:
@@ -39,6 +40,7 @@ def identity() -> dict:
 
     packages = {}
     editable = []
+    editable_sources = {}
     archives = {}
     for distribution in importlib.metadata.distributions():
         name = distribution.metadata["Name"]
@@ -46,6 +48,30 @@ def identity() -> dict:
         direct = json.loads(distribution.read_text("direct_url.json") or "{}")
         if direct.get("dir_info", {}).get("editable"):
             editable.append(name)
+            url = urlsplit(direct.get("url", ""))
+            if url.scheme == "file":
+                source = Path(unquote(url.path))
+                revision = subprocess.run(
+                    ["git", "-C", str(source), "rev-parse", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=30,
+                )
+                status = subprocess.run(
+                    ["git", "-C", str(source), "status", "--porcelain"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=30,
+                )
+                editable_sources[name] = {
+                    "url": direct["url"],
+                    "revision": revision.stdout.strip()
+                    if revision.returncode == 0
+                    else None,
+                    "dirty": status.returncode != 0 or bool(status.stdout.strip()),
+                }
         if name.startswith("nemo-fabric"):
             archives[name] = (
                 direct.get("archive_info", {}).get("hashes", {}).get("sha256")
@@ -86,6 +112,7 @@ def identity() -> dict:
         "runtime_origin": nemo_fabric.__file__,
         "packages": dict(sorted(packages.items())),
         "editable": sorted(editable),
+        "editable_sources": editable_sources,
         "wheel_sha256": archives,
         "catalog_sha256": hashlib.sha256(
             json.dumps(

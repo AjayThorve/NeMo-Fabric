@@ -217,7 +217,9 @@ def task_identity(path: Path) -> dict:
     }
 
 
-def stage_task(plan: dict, destination: Path, image: str) -> None:
+def stage_task(
+    plan: dict, destination: Path, image: str, task_python: str = "python3"
+) -> None:
     """Keep task assets and tests; use the prepared task plus harness image."""
     shutil.copytree(
         plan["task"]["path"],
@@ -234,17 +236,32 @@ def stage_task(plan: dict, destination: Path, image: str) -> None:
     # Run the upstream verifier unchanged and preserve its exit status.
     verifier = destination / "tests/test.sh"
     verifier.rename(destination / "tests/upstream-test.sh")
+    python = shlex.quote(task_python)
     verifier.write_text(
         "#!/bin/bash\n"
-        "python3 /qualification/identity.py > /logs/verifier/qualification-identity.json\n"
-        "python3 /qualification/identity.py --selection /tmp/fabric-run-*.json > /logs/verifier/qualification-selection.json\n"
+        f"{python} /qualification/identity.py > /logs/verifier/qualification-identity.json\n"
+        f"{python} /qualification/identity.py --selection /tmp/fabric-run-*.json > /logs/verifier/qualification-selection.json\n"
         "bash /tests/upstream-test.sh\n"
+    )
+
+
+def valid_install_sources(identity: dict) -> bool:
+    if not identity.get("editable"):
+        return True
+    source = identity.get("editable_sources", {}).get("hermes-agent", {})
+    revision = source.get("revision")
+    return (
+        identity["editable"] == ["hermes-agent"]
+        and isinstance(revision, str)
+        and re.fullmatch(r"[0-9a-f]{40}", revision) is not None
+        and revision == identity.get("harness_sources", {}).get("hermes-agent")
+        and source.get("dirty") is False
     )
 
 
 def unchanged_install(expected: dict, observed: dict) -> bool:
     """Protect Fabric/harness identity; record other task dependency changes only."""
-    if observed.get("editable"):
+    if not valid_install_sources(observed):
         return False
     for key, value in expected.items():
         if key == "packages":
@@ -255,6 +272,7 @@ def unchanged_install(expected: dict, observed: dict) -> bool:
                 or name
                 in {
                     "deepagents",
+                    "hermes-agent",
                     "mini-swe-agent",
                     "nooa",
                     "nooa-bench",
@@ -368,6 +386,11 @@ def validate_plan(plan: dict) -> None:
                 "model_provider must be non-empty without surrounding whitespace"
             )
         key = row.get("api_key_env")
+        task_python = row.get("task_python")
+        if task_python is not None and (
+            not isinstance(task_python, str) or not task_python.strip()
+        ):
+            raise ValueError("task_python must name a compatible task interpreter")
         if key and (
             not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
             or not re.search(r"(?:API_KEY|TOKEN|SECRET|PASSWORD)$", key)
@@ -440,7 +463,7 @@ def make_plan(args: argparse.Namespace) -> dict:
     catalog = load(getattr(args, "catalog_json", None) or ROOT / CATALOG)
     rows = []
     prerequisites = {
-        "nvidia.fabric.hermes": "Requires a supported preprovisioned Hermes image. The maintained Python 3.14 source revision explicitly forbids wheel/sdist builds; do not bypass its distribution guard or use an ambient editable install.",
+        "nvidia.fabric.hermes": "Requires a supported Hermes runtime/source image; select its compatible task_python and record pinned, clean source provenance.",
         "nvidia.fabric.remote-agent": "Requires an explicitly configured compatible HTTP endpoint/profile; workspace/tool execution is separate coverage.",
         "nvidia.fabric.kiro": "Requires Kiro CLI and KIRO_API_KEY with a Kiro-advertised provider/model; arbitrary inference endpoints are unsupported.",
         "nvidia.fabric.droid": "Requires Factory authentication or a prepared native Droid BYOK profile/image; custom endpoints use native settings, not model base_url.",
@@ -585,6 +608,8 @@ def harbor_command(
         "fabric_timeout_sec": plan["runtime_timeout_seconds"] + 60,
         "fabric_telemetry": row["telemetry"],
     }
+    if row.get("task_python") is not None:
+        options["fabric_python"] = row["task_python"]
     if row.get("model_provider") is not None:
         options["fabric_model_provider"] = row["model_provider"]
     if row.get("model_settings") is not None:
@@ -1058,6 +1083,7 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                     "harness_settings": row["harness_settings"],
                     "model_settings": row.get("model_settings"),
                     "max_turns": row.get("max_turns"),
+                    "task_python": row.get("task_python"),
                     "telemetry": row["telemetry"],
                 },
             }
@@ -1155,7 +1181,7 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
         directory.mkdir()
         task = directory / f"{prefix}-{index}"
         image = install["image"]
-        stage_task(plan, task, image)
+        stage_task(plan, task, image, row.get("task_python", "python3"))
         jobs = directory / "jobs"
         name = f"qualification-{index}"
         command = harbor_command(plan, row, host_python, task, jobs, name)
@@ -1210,7 +1236,7 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
             result["task_identity"] = task_identity
             if (
                 not result["checks"]["host_task_runtime_version"]
-                or task_identity["editable"]
+                or not valid_install_sources(task_identity)
                 or not result["checks"]["task_adapter_version"]
                 or task_identity["catalog_sha256"] != fingerprint(plan_catalog(plan))
                 or task_identity["wheel_sha256"].get("nemo-fabric-runtime")
@@ -1229,7 +1255,7 @@ def run(plan: dict, environment: dict, output: Path, selected: list[str]) -> int
                     "--label",
                     f"org.nvidia.fabric.qualification.run={prefix}",
                     "--entrypoint",
-                    "python",
+                    row.get("task_python", "python"),
                     "-i",
                     image,
                     "/qualification/identity.py",

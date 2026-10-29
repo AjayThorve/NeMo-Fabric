@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 ## Prerequisites And Scope
 
-Run from the repository root on Linux x86_64 with Git, Python 3.12 or newer, `uv`, Docker, and Docker Compose. The image builder preserves the selected task Docker environment and adds Node.js 24.16.0, Rust 1.94.0, and packaged NVIDIA NeMo Fabric and harness dependencies. The baseline task uses Python 3.13 on Debian Bookworm; custom tasks must provide a compatible Python 3.12+ Debian environment with pip and apt-get. It can download an isolated host Python interpreter through `uv`. Use a dedicated output directory on storage visible to the Docker daemon; Snap Docker needs a `TMPDIR` visible outside its private `/tmp`, as described in the [Harbor examples](../../../../examples/harbor/README.md#docker-installed-with-snap). Remote Docker daemons need the same absolute paths as the client. No host credential directories are mounted.
+Run from the repository root on Linux x86_64 with Git, Python 3.12 or newer, `uv`, Docker, and Docker Compose. The image builder preserves the selected task Docker environment and adds Node.js 24.16.0, Rust 1.94.0, and packaged NVIDIA NeMo Fabric and harness dependencies. The baseline task image uses Python 3.13 on Debian Bookworm; that is not a Fabric or Harbor version pin. Select any compatible installed interpreter for each component. Custom tasks must provide a compatible Debian environment with pip and apt-get. It can download an isolated host Python interpreter through `uv`. Use a dedicated output directory on storage visible to the Docker daemon; Snap Docker needs a `TMPDIR` visible outside its private `/tmp`, as described in the [Harbor examples](../../../../examples/harbor/README.md#docker-installed-with-snap). Remote Docker daemons need the same absolute paths as the client. No host credential directories are mounted.
 
 Choose the exact NVIDIA NeMo Fabric package version and matching checkout/catalog, plus an exact Harbor version compatible with that NeMo Fabric line. The native Harbor `fabric` agent is the default; `--bridge sdk` explicitly tests `nemo_fabric.integrations.harbor:FabricAgent` instead. Record the distinction when comparing runs. Native Harbor and the SDK bridge are independently versioned implementations.
 
@@ -73,7 +73,24 @@ coverage. Keep that profile confined to the disposable task image, record its
 Dockerfile/settings and final image identity, then mark the row runnable. Do
 not mount ambient Factory configuration or credentials.
 
-Hermes requires a supported preprovisioned task image. The source revision maintained in `just install-hermes-agent` needs Python 3.14 and explicitly rejects wheel/sdist builds. The development recipe uses editable installs and does not verify noneditable installation. Do not set an unrelated build-system escape hatch to bypass that guard. Until a suitable supported image is available, retain the entry as blocked; an attempted unsupported installation is a recorded install failure, not a pass. A custom source image can include `/opt/qualification-harness-sources.json` mapping harness names to exact revisions, which the identity collector retains.
+Hermes uses its upstream-supported Python 3.14 runtime and source/assets layout;
+its broader package metadata also supports older updaters, not older runtimes.
+Use a prepared task image with an isolated 3.14 environment, its frozen core +
+`mcp` dependency graph, and the exact supported source installation. Do not
+bypass its wheel/sdist build guard. Set the row's `task_python` to that
+environment's executable. Harbor may use a different compatible host Python;
+the runner and identity/descriptor probes use `task_python`, while the upstream
+task verifier keeps its original interpreter and instructions. No exact match
+between host and task Python versions is required.
+
+Fabric runtime/catalog/adapter packages must remain noneditable. A pinned
+Hermes source installation is supported even when its metadata says editable:
+record `{"hermes-agent":"<exact-commit>"}` in
+`/opt/qualification-harness-sources.json`. The identity collector records its
+actual Git revision, source URL and dirty state; the gate requires a matching
+clean source revision before and after the trial. The complete dependency and
+interpreter identities remain evidence. Read-only image permissions are useful
+but are not a sandbox against the task's root user.
 
 The Codex profile uses `danger-full-access` and `deny_all` **inside the gate-created Harbor task container**. Harbor supplies the isolation boundary; nested `bwrap` sandboxing requires user namespaces that many Docker hosts prohibit. Do not reuse this profile on a host workspace or attach host credentials, Docker sockets, or unrelated files to the task. The gate never enables privileged Docker mode or changes host namespace policy.
 
@@ -123,7 +140,7 @@ python3 "$QUALIFY/prepare.py" --plan "$WORK/plan.json" --work "$WORK/environment
 
 Preparation and execution each require new directories and never overwrite previous evidence. Pass `--host-python /absolute/path/to/python` to `prepare.py` to use an existing Python 3.12+ interpreter rather than downloading Python 3.12. A base installation failure writes `environment.json` and logs before exiting; run the gate with `python3` in that case to produce a fully blocked report. `prepare.py` continues past individual harness installation failures, which become failed matrix rows. Retain the environment directory while inspecting or reproducing a run. Images are tagged with the source revision; record their immutable IDs in the report. No image is pushed.
 
-For a keyed HTTPS provider, export `MODEL_API_KEY` securely, use its model slug and `--base-url https://...`, supply a nonzero cost estimate with token/pricing assumptions, and set the appropriate endpoint kind. Each plan row can override `model`, `model_provider`, `base_url`, `api_key_env`, `harness_settings`, `telemetry`, and `image`. A custom task image must contain the matching runtime/catalog/adapter, its harness, `/qualification/identity.py`, and `/opt/qualification-identity.json` produced by that script. It must use noneditable package installs. Set a prerequisite row's `action` to `run` only after providing those dependencies. Do not pass a generic local model to a proprietary provider under a fabricated model alias.
+For a keyed HTTPS provider, export `MODEL_API_KEY` securely, use its model slug and `--base-url https://...`, supply a nonzero cost estimate with token/pricing assumptions, and set the appropriate endpoint kind. Each plan row can override `model`, `model_provider`, `base_url`, `api_key_env`, `harness_settings`, `telemetry`, and `image`. A custom task image must contain the matching runtime/catalog/adapter, its harness, `/qualification/identity.py`, and `/opt/qualification-identity.json` produced by that script. Fabric packages must be noneditable; supported pinned Hermes source installs follow the provenance rules above. Set a prerequisite row's `action` to `run` only after providing those dependencies. Do not pass a generic local model to a proprietary provider under a fabricated model alias.
 
 For an OpenAI-compatible endpoint with a vendor-prefixed served ID, set that row’s `model_provider` to `openai` without changing `model`. This requires the SDK bridge containing [PR #522](https://github.com/NVIDIA/NeMo-Fabric/pull/522); generate the plan with `--bridge sdk`. Native Harbor’s equivalent option is deferred to a separate upstream change. The selected provider is retained in both admission input and the report. Older SDKs remain usable when the override is omitted.
 

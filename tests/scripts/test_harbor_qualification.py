@@ -585,6 +585,54 @@ def test_task_dependencies_can_change_but_fabric_and_harness_identity_cannot(cha
     assert not qualify.unchanged_install(expected, observed)
 
 
+@pytest.mark.parametrize(
+    "mutation", [None, "fabric_editable", "dirty", "revision", "unrecorded"]
+)
+def test_pinned_hermes_source_install_is_allowed_without_editable_fabric(mutation):
+    revision = "a" * 40
+    expected = {
+        "editable": ["hermes-agent"],
+        "editable_sources": {"hermes-agent": {"revision": revision, "dirty": False}},
+        "harness_sources": {"hermes-agent": revision},
+        "packages": {"nemo-fabric-runtime": "0.6.0", "hermes-agent": "0.0.0"},
+    }
+    observed = copy.deepcopy(expected)
+    if mutation == "fabric_editable":
+        observed["editable"].append("nemo-fabric-runtime")
+    elif mutation == "dirty":
+        observed["editable_sources"]["hermes-agent"]["dirty"] = True
+    elif mutation == "revision":
+        observed["editable_sources"]["hermes-agent"]["revision"] = "b" * 40
+    elif mutation == "unrecorded":
+        observed["harness_sources"] = {}
+    assert qualify.unchanged_install(expected, observed) is (mutation is None)
+
+
+@pytest.mark.usefixtures("clean_qualification_checkout")
+def test_task_interpreter_reaches_runner_and_identity_without_rewriting_verifier(
+    qualification_plan, tmp_path
+):
+    row = next(
+        r
+        for r in qualification_plan["adapters"]
+        if r["adapter_id"] == "nvidia.fabric.hermes"
+    )
+    row["task_python"] = "/opt/hermes-runtime/bin/python"
+    qualify.validate_plan(qualification_plan)
+    command = qualify.harbor_command(
+        qualification_plan, row, "host-python", tmp_path, tmp_path, "trial"
+    )
+    assert "fabric_python=/opt/hermes-runtime/bin/python" in command
+    task = tmp_path / "task"
+    qualify.stage_task(qualification_plan, task, "prepared:exact", row["task_python"])
+    wrapper = (task / "tests/test.sh").read_text()
+    assert "/opt/hermes-runtime/bin/python /qualification/identity.py" in wrapper
+    assert "bash /tests/upstream-test.sh" in wrapper
+    assert (task / "tests/upstream-test.sh").read_bytes() == (
+        Path(qualification_plan["task"]["path"]) / "tests/test.sh"
+    ).read_bytes()
+
+
 def test_dirty_checkout_is_rejected(tmp_path, qualification_plan):
     repository = tmp_path / "repo"
     repository.mkdir()
