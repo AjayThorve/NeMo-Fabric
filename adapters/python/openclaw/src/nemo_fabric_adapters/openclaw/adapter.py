@@ -1042,6 +1042,16 @@ class OpenClawRuntime:
             command, "--version", env=child_env, timeout=startup_timeout
         )
         version = _validate_openclaw_version(version_output)
+        from nemo_fabric_adapters.common.provenance import record_version
+
+        record_version(
+            "openclaw",
+            version,
+            "adapter:openclaw_startup_version",
+            participant="service",
+            origin="observed",
+            kind="component",
+        )
 
         port = _select_port(settings)
 
@@ -1241,7 +1251,17 @@ class OpenClawRuntime:
             version = response.json()["version"]
             if not isinstance(version, str):
                 raise TypeError("version is not a string")
-            return _validate_openclaw_version(f"OpenClaw {version}")
+            validated = _validate_openclaw_version(f"OpenClaw {version}")
+            from nemo_fabric_adapters.common.provenance import record_version
+
+            record_version(
+                "openclaw",
+                validated,
+                "service:startupz",
+                participant="service",
+                kind="component",
+            )
+            return validated
         except lifecycle.LifecycleError:
             raise
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
@@ -1738,7 +1758,6 @@ def main() -> None:
     lifecycle.serve(OpenClawRuntime, config_loader=contract.AgentConfig.from_mapping)
 
 
-
 # Selected software reported by the shared lifecycle host; no dependency scan.
 PROVENANCE_PACKAGES = (
     (
@@ -1747,7 +1766,6 @@ PROVENANCE_PACKAGES = (
         "nemo_fabric_adapters.openclaw.adapter",
     ),
 )
-PROVENANCE_HARNESS = "openclaw"
 
 if __name__ == "__main__":
     main()

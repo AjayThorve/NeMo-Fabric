@@ -770,6 +770,8 @@ enum AdapterServiceContext {
         reference: ServiceReference,
     },
     Connect {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        execution: Option<crate::ExecutionEvidence>,
         service_id: String,
         connection_path: PathBuf,
     },
@@ -874,6 +876,7 @@ struct RelayRuntimeConfig {
 }
 
 struct LocalAdapterHost {
+    service_execution: Option<crate::ExecutionEvidence>,
     execution: Option<crate::ExecutionEvidence>,
     adapter_execution: Option<crate::ExecutionEvidence>,
     child: Child,
@@ -892,6 +895,7 @@ struct LocalAdapterHost {
 }
 
 struct LocalServiceRecord {
+    software_report: Option<crate::ExecutionEvidence>,
     host: LocalAdapterHost,
     runtime: RuntimeHandle,
     handle: ServiceHandle,
@@ -1036,8 +1040,28 @@ pub fn start_runtime_with_service(
     let runtime = start_local_runtime(
         plan,
         environment,
-        Some((service.service_id.clone(), record.connection_path.clone())),
+        Some((
+            service.service_id.clone(),
+            record.connection_path.clone(),
+            if plan.config.provenance.enabled {
+                record.software_report.clone()
+            } else {
+                None
+            },
+        )),
     )?;
+    if plan.config.provenance.enabled {
+        let host = { local_hosts().get(&runtime.runtime_id).cloned() };
+        if let Some(host) = host {
+            let host = host.lock().unwrap_or_else(|error| error.into_inner());
+            if let Some(report) = host.adapter_execution.as_ref().and_then(service_evidence) {
+                record.software_report = Some(retain_service_snapshot(
+                    report,
+                    record.software_report.as_ref(),
+                ));
+            }
+        }
+    }
     record.active_runtime_ids.insert(runtime.runtime_id.clone());
     Ok(runtime)
 }
@@ -1149,6 +1173,14 @@ fn start_service(
             local_host_diagnostics(&host),
         )
     })?;
+    let software_report = if plan.config.provenance.enabled {
+        host.adapter_execution
+            .as_ref()
+            .and_then(service_evidence)
+            .or_else(|| service_metadata_evidence(&info))
+    } else {
+        None
+    };
     let service_binding = service_binding(&service_id, plan, ownership, &info)?;
     let handle = ServiceHandle {
         service_id: service_id.clone(),
@@ -1175,6 +1207,7 @@ fn start_service(
     local_services().insert(
         service_id,
         Arc::new(Mutex::new(LocalServiceRecord {
+            software_report,
             host,
             runtime,
             handle: handle.clone(),
@@ -1645,7 +1678,7 @@ fn service_binding(
     info: &AdapterServiceInfo,
 ) -> Result<String> {
     let mut binding_plan = plan.clone();
-    binding_plan.config.provenance.reports = None;
+    binding_plan.config.provenance = Default::default();
     stable_hash(
         "fabric-service-binding",
         &ServiceBindingMaterial {
@@ -1848,10 +1881,12 @@ impl RuntimeAdapter for LocalHostAdapter {
 fn start_local_runtime(
     plan: &RunPlan,
     environment: EnvironmentHandle,
-    service: Option<(String, PathBuf)>,
+    service: Option<(String, PathBuf, Option<crate::ExecutionEvidence>)>,
 ) -> Result<RuntimeHandle> {
     validate_local_host(plan, &environment)?;
-    let service_id = service.as_ref().map(|(service_id, _)| service_id.clone());
+    let service_id = service
+        .as_ref()
+        .map(|(service_id, _, _)| service_id.clone());
     let runtime_id = new_id("runtime");
     let runtime_binding = runtime_binding(&runtime_id, service_id.as_ref(), plan, &environment)?;
     let runtime = RuntimeHandle {
@@ -1872,9 +1907,11 @@ fn start_local_runtime(
     let mut artifacts = artifact_manifest(plan)?;
     let fabric_home = prepare_fabric_home(&artifacts, &runtime, &start_invocation)?;
     let relay_config = prepare_relay_runtime_config(plan, &runtime, &fabric_home, &mut artifacts)?;
+    let service_execution = service.as_ref().and_then(|(_, _, report)| report.clone());
     let service_context =
         service.map(
-            |(service_id, connection_path)| AdapterServiceContext::Connect {
+            |(service_id, connection_path, execution)| AdapterServiceContext::Connect {
+                execution,
                 service_id,
                 connection_path,
             },
@@ -1911,6 +1948,7 @@ fn start_local_runtime(
             return Err(error);
         }
     };
+    host.service_execution = service_execution;
     if let Err(error) = exchange_lifecycle_message(
         &mut host,
         &runtime.runtime_id,
@@ -2195,7 +2233,15 @@ fn run_local_host_invocation_with_timeout(
                         if let (Some(report), Some(adapter)) =
                             (&mut execution, &host_guard.adapter_execution)
                         {
-                            report.append(adapter.clone());
+                            append_adapter_evidence(
+                                report,
+                                adapter,
+                                host_guard.service_execution.as_ref(),
+                            );
+                        } else if let (Some(report), Some(service)) =
+                            (&mut execution, &host_guard.service_execution)
+                        {
+                            report.append(service.clone());
                         }
                         execution
                     },
@@ -2718,6 +2764,7 @@ fn spawn_local_host(
         });
     }
     Ok(LocalAdapterHost {
+        service_execution: None,
         execution: crate::provenance::core_snapshot(&plan.config.provenance),
         adapter_execution: None,
         child,
@@ -2913,10 +2960,18 @@ fn exchange_lifecycle_message(
         && operation != AdapterLifecycleOperation::Stop
         && (response.execution.is_some() || host.adapter_execution.is_none())
     {
-        host.adapter_execution = Some(crate::ExecutionEvidence::receive(
-            response.execution,
-            "adapter",
-        ));
+        let mut report = crate::ExecutionEvidence::receive(response.execution, "adapter");
+        if !report
+            .software_environments
+            .iter()
+            .any(|env| env.participants.iter().any(|p| p == "adapter"))
+        {
+            report.append(crate::ExecutionEvidence::gap(
+                "adapter",
+                "expected_adapter_report_missing",
+            ));
+        }
+        host.adapter_execution = Some(report);
     }
     match response.outcome {
         AdapterLifecycleOutcome::Succeeded { output } => Ok(output),
@@ -6557,6 +6612,257 @@ for line in sys.stdin:
     }
 
     #[test]
+    fn adapter_service_evidence_preserves_infrastructure_references() {
+        let mut adapter = crate::ExecutionEvidence::gap("adapter", "fixture");
+        adapter.append(crate::ExecutionEvidence::gap("service", "fixture"));
+        adapter.software_environments[1].status = crate::provenance::InventoryStatus::Available;
+        adapter.software_environments[1].complete = true;
+        adapter.software_environments[1].reason = None;
+        let observation = serde_json::json!({
+            "status": "available", "value": "fixture-engine",
+            "source": "owner:existing_report", "origin": "reported",
+            "observed_at": "2026-10-27T12:00:00Z"
+        });
+        adapter.infrastructure = Some(
+            serde_json::from_value(serde_json::json!({
+                "container": {
+                    "context_refs": [adapter.software_environments[1].context_ref],
+                    "engine": observation, "engine_version": observation
+                }
+            }))
+            .unwrap(),
+        );
+        assert!(adapter.valid());
+        let retained = service_evidence(&adapter).unwrap();
+        let mut report = crate::ExecutionEvidence::gap("core", "fixture");
+        append_adapter_evidence(&mut report, &adapter, Some(&retained));
+        assert!(report.valid());
+        assert_eq!(report.software_environments.len(), 3);
+        assert_eq!(report.software_environments[2].participants, ["service"]);
+        assert_eq!(
+            report
+                .infrastructure
+                .as_ref()
+                .unwrap()
+                .container
+                .as_ref()
+                .unwrap()
+                .context_refs,
+            [report.software_environments[2].context_ref.clone()]
+        );
+    }
+
+    fn retained_service_fixture() -> crate::ExecutionEvidence {
+        serde_json::from_value(serde_json::json!({
+            "software_environments": [{
+                "context_ref": "startup-service", "participants": ["service"],
+                "status": "available", "complete": true,
+                "entries": [{"role": "harness", "kind": "component", "name": "server",
+                    "version": {"status": "available", "value": "1.0+startup",
+                        "source": "service:startup", "origin": "reported",
+                        "observed_at": "2026-10-27T12:00:00Z"}}]
+            }],
+            "infrastructure": {"container": {
+                "context_refs": ["startup-service"],
+                "engine": {"status": "available", "value": "docker", "source": "owner:startup",
+                    "origin": "reported", "observed_at": "2026-10-27T12:00:00Z"},
+                "engine_version": {"status": "available", "value": "28.0", "source": "owner:startup",
+                    "origin": "reported", "observed_at": "2026-10-27T12:00:00Z"}
+            }}
+        })).unwrap()
+    }
+
+    #[test]
+    fn retained_service_infrastructure_survives_missing_current_report() {
+        let retained = service_evidence(&retained_service_fixture()).unwrap();
+        let mut result = crate::ExecutionEvidence::gap("core", "fixture");
+        append_adapter_evidence(
+            &mut result,
+            &crate::ExecutionEvidence::gap("adapter", "missing"),
+            Some(&retained),
+        );
+        assert!(result.valid());
+        assert_eq!(
+            result.software_environments[2].entries,
+            retained.software_environments[0].entries
+        );
+        assert_eq!(
+            result
+                .infrastructure
+                .unwrap()
+                .container
+                .unwrap()
+                .context_refs,
+            ["env-2"]
+        );
+    }
+
+    #[test]
+    fn partial_service_reports_preserve_retained_startup_and_deduplicate_infrastructure() {
+        for complete in [false, true] {
+            let retained = retained_service_fixture();
+            let mut adapter = retained.clone();
+            adapter.software_environments[0].entries.clear();
+            adapter.software_environments[0].complete = complete;
+            adapter.software_environments[0].reason = (!complete).then(|| "partial".into());
+            let mut result = crate::ExecutionEvidence::gap("core", "fixture");
+            append_adapter_evidence(&mut result, &adapter, Some(&retained));
+            assert!(result.valid());
+            assert_eq!(result.software_environments.len(), 3);
+            assert_eq!(
+                result.software_environments[2].entries,
+                retained.software_environments[0].entries
+            );
+            assert_eq!(
+                result
+                    .infrastructure
+                    .unwrap()
+                    .container
+                    .unwrap()
+                    .context_refs,
+                ["env-1", "env-2"]
+            );
+        }
+    }
+
+    #[test]
+    fn unavailable_reconnect_cannot_replace_shared_startup_snapshot() {
+        let retained = retained_service_fixture();
+        let current = crate::ExecutionEvidence::gap("service", "unavailable");
+        let saved = retain_service_snapshot(current, Some(&retained));
+        assert_eq!(saved, retained);
+        assert_eq!(retain_service_snapshot(saved.clone(), Some(&saved)), saved);
+        let mut next_connection = crate::ExecutionEvidence::gap("core", "fixture");
+        append_adapter_evidence(
+            &mut next_connection,
+            &crate::ExecutionEvidence::gap("adapter", "missing"),
+            Some(&saved),
+        );
+        assert!(next_connection.valid());
+        assert_eq!(
+            next_connection.software_environments[2].entries[0]
+                .version
+                .value
+                .as_deref(),
+            Some("1.0+startup")
+        );
+    }
+
+    #[test]
+    fn current_available_service_version_replaces_its_startup_observation() {
+        let retained = retained_service_fixture();
+        let mut current = retained.clone();
+        current.software_environments[0].entries[0].version.value = Some("2.0+current".into());
+        current.software_environments[0].entries[0]
+            .version
+            .observed_at = "2026-10-28T12:00:00Z".into();
+        let saved = retain_service_snapshot(current.clone(), Some(&retained));
+        assert_eq!(saved.software_environments.len(), 1);
+        assert_eq!(
+            saved.software_environments[0].entries,
+            current.software_environments[0].entries
+        );
+        let mut result = crate::ExecutionEvidence::default();
+        append_adapter_evidence(&mut result, &current, Some(&retained));
+        assert!(result.valid());
+        assert_eq!(result.software_environments.len(), 1);
+        assert_eq!(
+            result.software_environments[0].entries[0]
+                .version
+                .value
+                .as_deref(),
+            Some("2.0+current")
+        );
+    }
+
+    #[test]
+    fn conflicting_service_infrastructure_stays_an_explicit_gap() {
+        let retained = retained_service_fixture();
+        let mut adapter = retained.clone();
+        adapter
+            .infrastructure
+            .as_mut()
+            .unwrap()
+            .container
+            .as_mut()
+            .unwrap()
+            .engine_version
+            .value = Some("29.0".into());
+        let mut result = crate::ExecutionEvidence::default();
+        append_adapter_evidence(&mut result, &adapter, Some(&retained));
+        assert!(result.valid());
+        assert_eq!(
+            result.software_environments[0].reason.as_deref(),
+            Some("conflicting_infrastructure_reports")
+        );
+    }
+
+    #[test]
+    fn adapter_without_service_evidence_uses_the_retained_snapshot() {
+        let adapter = crate::ExecutionEvidence::gap("adapter", "fixture");
+        let retained = crate::ExecutionEvidence::gap("service", "fixture");
+        let mut report = crate::ExecutionEvidence::gap("core", "fixture");
+        append_adapter_evidence(&mut report, &adapter, Some(&retained));
+        assert!(report.valid());
+        assert_eq!(report.software_environments.len(), 3);
+        assert_eq!(report.software_environments[2].participants, ["service"]);
+        assert_eq!(retained.software_environments[0].context_ref, "env-0");
+    }
+
+    #[test]
+    fn adapter_service_gap_does_not_hide_a_retained_observation() {
+        let mut adapter = crate::ExecutionEvidence::gap("adapter", "fixture");
+        adapter.append(crate::ExecutionEvidence::gap("service", "report_missing"));
+        let retained: crate::ExecutionEvidence = serde_json::from_value(serde_json::json!({
+            "software_environments": [{
+                "context_ref": "original-service", "participants": ["service"],
+                "status": "available", "complete": true,
+                "entries": [{"role": "harness", "kind": "component", "name": "openclaw",
+                    "version": {"status": "available", "value": "2026.9.4",
+                        "source": "service:startupz", "origin": "reported",
+                        "observed_at": "2026-10-27T12:00:00Z"}}]
+            }]
+        }))
+        .unwrap();
+        let mut report = crate::ExecutionEvidence::gap("core", "fixture");
+        append_adapter_evidence(&mut report, &adapter, Some(&retained));
+        assert!(report.valid());
+        assert_eq!(report.software_environments.len(), 4);
+        assert_eq!(
+            report.software_environments[2].reason.as_deref(),
+            Some("report_missing")
+        );
+        assert_eq!(
+            report.software_environments[3].entries,
+            retained.software_environments[0].entries
+        );
+        assert_eq!(
+            retained.software_environments[0].context_ref,
+            "original-service"
+        );
+    }
+
+    #[test]
+    fn runtime_binding_excludes_observations_but_binds_initial_collection_control() {
+        let (root, plan) = local_host_plan("ok");
+        let environment = prepare_environment(&plan).unwrap();
+        let original = runtime_binding("test-runtime", None, &plan, &environment).unwrap();
+        let mut changed = plan.clone();
+        changed.config.provenance.reports =
+            Some(crate::ExecutionEvidence::gap("application", "test"));
+        assert_eq!(
+            runtime_binding("test-runtime", None, &changed, &environment).unwrap(),
+            original
+        );
+        changed.config.provenance.enabled = false;
+        assert_ne!(
+            runtime_binding("test-runtime", None, &changed, &environment).unwrap(),
+            original
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn explicit_binding_starts_in_the_prepared_local_environment() {
         let (root, plan) = local_host_plan("success");
         let environment = prepare_environment(&plan).expect("prepare local environment");
@@ -6669,4 +6975,219 @@ for line in sys.stdin:
         ));
         let _ = fs::remove_dir_all(root);
     }
+}
+
+fn covers_service_observations(
+    adapter: &crate::ExecutionEvidence,
+    retained: &crate::ExecutionEvidence,
+) -> bool {
+    // Availability alone does not establish coverage of startup observations.
+    retained.software_environments.iter().all(|old| {
+        adapter.software_environments.iter().any(|current| {
+            current.status == crate::provenance::InventoryStatus::Available
+                && current.participants.iter().any(|p| p == "service")
+                && old.entries.iter().all(|entry| {
+                    current.entries.iter().any(|new| {
+                        new.role == entry.role
+                            && new.kind == entry.kind
+                            && new.name == entry.name
+                            && (new.version.status == crate::provenance::EvidenceStatus::Available
+                                || entry.version.status
+                                    != crate::provenance::EvidenceStatus::Available)
+                    })
+                })
+        })
+    }) && retained.infrastructure.as_ref().is_none_or(|old| {
+        adapter.infrastructure.as_ref().is_some_and(|current| {
+            old.sandbox.as_ref().is_none_or(|old| {
+                current.sandbox.as_ref().is_some_and(|new| {
+                    old.provider == new.provider && old.service_version == new.service_version
+                })
+            }) && old.container.as_ref().is_none_or(|old| {
+                current.container.as_ref().is_some_and(|new| {
+                    old.engine == new.engine && old.engine_version == new.engine_version
+                })
+            })
+        })
+    })
+}
+
+fn append_adapter_evidence(
+    report: &mut crate::ExecutionEvidence,
+    adapter: &crate::ExecutionEvidence,
+    retained_service: Option<&crate::ExecutionEvidence>,
+) {
+    let covers_retained =
+        retained_service.is_none_or(|retained| covers_service_observations(adapter, retained));
+    report.append(adapter.clone());
+    if !covers_retained && let Some(service) = retained_service {
+        let mut service = service.clone();
+        let refs: std::collections::BTreeMap<_, _> = service
+            .software_environments
+            .iter()
+            .enumerate()
+            .map(|(index, env)| {
+                (
+                    env.context_ref.clone(),
+                    format!("env-{}", report.software_environments.len() + index),
+                )
+            })
+            .collect();
+        let mut sandbox_refs = Vec::new();
+        let mut container_refs = Vec::new();
+        // Forwarded startup infrastructure can appear in both reports. Deduplicate
+        // identical owner observations; conflicting reports retain append's gap.
+        if let (Some(old), Some(current)) = (&mut service.infrastructure, &adapter.infrastructure) {
+            if let (Some(left), Some(right)) = (&old.sandbox, &current.sandbox) {
+                let mut right = right.clone();
+                right.context_refs = left.context_refs.clone();
+                if *left == right {
+                    sandbox_refs = left
+                        .context_refs
+                        .iter()
+                        .filter_map(|key| refs.get(key).cloned())
+                        .collect();
+                    old.sandbox = None;
+                }
+            }
+            if let (Some(left), Some(right)) = (&old.container, &current.container) {
+                let mut right = right.clone();
+                right.context_refs = left.context_refs.clone();
+                if *left == right {
+                    container_refs = left
+                        .context_refs
+                        .iter()
+                        .filter_map(|key| refs.get(key).cloned())
+                        .collect();
+                    old.container = None;
+                }
+            }
+        }
+        report.append(service);
+        if !sandbox_refs.is_empty() || !container_refs.is_empty() {
+            let surviving: std::collections::BTreeSet<_> = report
+                .software_environments
+                .iter()
+                .filter(|env| {
+                    env.participants
+                        .iter()
+                        .any(|participant| participant == "service")
+                })
+                .map(|env| env.context_ref.clone())
+                .collect();
+            let extend = |keys: &mut Vec<String>, additional: Vec<String>| {
+                for key in additional {
+                    if surviving.contains(&key) && !keys.contains(&key) {
+                        keys.push(key);
+                    }
+                }
+            };
+            if let Some(infra) = &mut report.infrastructure {
+                if let Some(value) = &mut infra.sandbox {
+                    extend(&mut value.context_refs, sandbox_refs);
+                }
+                if let Some(value) = &mut infra.container {
+                    extend(&mut value.context_refs, container_refs);
+                }
+            }
+            // Additional joins also count toward the serialized byte budget.
+            report.append(crate::ExecutionEvidence::default());
+        }
+    }
+}
+
+fn retain_service_snapshot(
+    current: crate::ExecutionEvidence,
+    retained: Option<&crate::ExecutionEvidence>,
+) -> crate::ExecutionEvidence {
+    if let Some(retained) = retained
+        && ((covers_service_observations(retained, &current)
+            && current.software_environments.iter().all(|env| {
+                env.entries.iter().all(|entry| {
+                    retained
+                        .software_environments
+                        .iter()
+                        .any(|old| old.entries.contains(entry))
+                })
+            }))
+            || !current
+                .software_environments
+                .iter()
+                .any(|env| env.status == crate::provenance::InventoryStatus::Available))
+    {
+        return retained.clone();
+    }
+    let mut result = crate::ExecutionEvidence::default();
+    append_adapter_evidence(&mut result, &current, retained);
+    result
+}
+
+fn service_evidence(report: &crate::ExecutionEvidence) -> Option<crate::ExecutionEvidence> {
+    let mut environments: Vec<_> = report
+        .software_environments
+        .iter()
+        .filter(|env| env.participants.iter().any(|p| p == "service"))
+        .cloned()
+        .collect();
+    if environments.is_empty() {
+        return None;
+    }
+    let mut refs = std::collections::BTreeMap::new();
+    for (index, env) in environments.iter_mut().enumerate() {
+        let key = format!("env-{index}");
+        refs.insert(env.context_ref.clone(), key.clone());
+        env.context_ref = key;
+    }
+    let remap = |keys: &mut Vec<String>| {
+        *keys = keys
+            .iter()
+            .filter_map(|key| refs.get(key).cloned())
+            .collect();
+        !keys.is_empty()
+    };
+    let mut infrastructure = report.infrastructure.clone();
+    if let Some(infra) = &mut infrastructure {
+        if let Some(value) = &mut infra.sandbox
+            && !remap(&mut value.context_refs)
+        {
+            infra.sandbox = None;
+        }
+        if let Some(value) = &mut infra.container
+            && !remap(&mut value.context_refs)
+        {
+            infra.container = None;
+        }
+    }
+    Some(crate::ExecutionEvidence {
+        software_environments: environments,
+        infrastructure,
+    })
+}
+
+fn service_metadata_evidence(info: &AdapterServiceInfo) -> Option<crate::ExecutionEvidence> {
+    use crate::provenance::*;
+    let value = info.metadata.get("openclaw_version")?.as_str()?.to_string();
+    Some(ExecutionEvidence {
+        software_environments: vec![SoftwareEnvironment {
+            context_ref: "env-0".into(),
+            participants: vec!["service".into()],
+            status: InventoryStatus::Available,
+            complete: true,
+            reason: None,
+            entries: vec![SoftwareEntry {
+                role: "harness".into(),
+                kind: "component".into(),
+                name: "openclaw".into(),
+                version: VersionObservation {
+                    status: EvidenceStatus::Available,
+                    value: Some(value),
+                    source: "core:service_start_report".into(),
+                    origin: EvidenceOrigin::Reported,
+                    observed_at: crate::time::rfc3339_millis(SystemTime::now()),
+                    reason: None,
+                },
+            }],
+        }],
+        infrastructure: None,
+    })
 }
