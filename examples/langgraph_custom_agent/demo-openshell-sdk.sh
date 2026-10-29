@@ -59,11 +59,12 @@ run_workload_consumer() {
   if [[ -n "${OPENSHELL_LANGGRAPH_BASE_URL:-}" ]]; then
     model_args+=(--base-url "${OPENSHELL_LANGGRAPH_BASE_URL}")
   fi
+  # Guard empty optional arrays for Bash 3.2 with set -u.
   uv run --no-sync python -m examples.langgraph_custom_agent.consumer.openshell \
     --ownership "${ownership}" \
     --gateway "http://127.0.0.1:${GATEWAY_PORT}" \
     --image "${RUNTIME_IMAGE}" \
     --policy-file "${POLICY_FILE}" \
     --results-file "${RESULT_DIR}/${ownership}-report.json" \
-    "${relay_args[@]}" "${mcp_args[@]}" "${model_args[@]}" "$@"
+    ${relay_args[@]+"${relay_args[@]}"} ${mcp_args[@]+"${mcp_args[@]}"} ${model_args[@]+"${model_args[@]}"} "$@"
 }
